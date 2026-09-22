@@ -1,6 +1,6 @@
 # Swarm Ledger
 
-Who the IMD swarm paid. Live at **https://johnfreeman777.github.io/imd-rewards/**
+Who the IMD swarm paid. Live at **https://johnfreeman777.github.io/swarm-ledger/**
 
 Type a wallet address, or an identity.md NFT number, and see:
 

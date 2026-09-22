@@ -132,7 +132,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
   <nav>
     <a class="opt" href="https://imd.fun" target="_blank" rel="noopener">imd.fun</a>
     <a class="opt" href="https://explorer.imd.fun" target="_blank" rel="noopener">Explorer</a>
-    <a href="https://github.com/johnfreeman777/imd-rewards" target="_blank" rel="noopener">Source</a>
+    <a href="https://github.com/johnfreeman777/swarm-ledger" target="_blank" rel="noopener">Source</a>
     <button id="theme" type="button" aria-label="Switch light or dark"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor"/></svg></button>
   </nav>
 </div></header>
@@ -190,7 +190,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 // On GitHub Pages or localhost the snapshot sits next to the page; any other host
 // (e.g. an IPFS copy under the network's name) reads the one GitHub Pages keeps fresh.
 const LOCAL = /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
-const DATA_URL = LOCAL ? "data/snapshot.json" : "https://johnfreeman777.github.io/imd-rewards/data/snapshot.json";
+const DATA_URL = LOCAL ? "data/snapshot.json" : "https://johnfreeman777.github.io/swarm-ledger/data/snapshot.json";
 const RPC = { 1: "https://ethereum-rpc.publicnode.com", 11155111: "https://ethereum-sepolia-rpc.publicnode.com" };
 const CLAIMED_SEL = "0x120aa877"; // claimed(uint256 round, address account)
 const $ = (id) => document.getElementById(id);
@@ -228,12 +228,12 @@ async function copy(t) { try { await navigator.clipboard.writeText(t); toast("co
 
 // theme: explicit choice wins over the system setting
 (function () {
-  const saved = load("imd-rewards-theme");
+  const saved = load("swarm-ledger-theme");
   if (saved) document.documentElement.dataset.theme = saved;
   $("theme").addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next; store("imd-rewards-theme", next);
+    document.documentElement.dataset.theme = next; store("swarm-ledger-theme", next);
   });
 })();
 
@@ -320,7 +320,7 @@ function lookup(input) {
   if (!wallet) { $("status").textContent = "Enter a 0x wallet, or the number of an NFT that has worked on the network."; return; }
   current = wallet;
   history.replaceState(null, "", "#" + wallet);
-  store("imd-rewards-wallet", wallet);
+  store("swarm-ledger-wallet", wallet);
   $("q").value = input.trim();
 
   const rows = rowsFor(wallet);
@@ -401,7 +401,7 @@ fetch(DATA_URL, { cache: "no-cache" })
     snap = d; renderLanding();
     const start = decodeURIComponent(location.hash.slice(1));
     if (start) lookup(start);
-    else { const last = load("imd-rewards-wallet"); if (last) $("q").value = last; }
+    else { const last = load("swarm-ledger-wallet"); if (last) $("q").value = last; }
   })
   .catch((e) => { $("status").textContent = "Could not load data: " + e.message; });
 </script>

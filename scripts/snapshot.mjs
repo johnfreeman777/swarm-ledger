@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds data/snapshot.json for the IMD rewards tracker.
+// Builds data/snapshot.json for Swarm Ledger.
 //
 // api.imd.fun sends no CORS headers, so a browser page on another origin cannot read
 // it directly. This script runs on a schedule (GitHub Actions), reads the public API,
@@ -36,7 +36,7 @@ const u256 = (hex, i = 0) => BigInt("0x" + (hex.replace(/^0x/, "").slice(i * 64,
 
 async function getJson(path, attempt = 0) {
   try {
-    const r = await fetch(API + path, { signal: AbortSignal.timeout(30_000), headers: { "user-agent": "imd-rewards-tracker" } });
+    const r = await fetch(API + path, { signal: AbortSignal.timeout(30_000), headers: { "user-agent": "swarm-ledger" } });
     if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
