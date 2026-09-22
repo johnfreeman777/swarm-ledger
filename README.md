@@ -1,4 +1,6 @@
-# IMD Rewards Tracker
+# Swarm Ledger
+
+Who the IMD swarm paid. Live at **https://johnfreeman777.github.io/imd-rewards/**
 
 Type a wallet address, or an identity.md NFT number, and see:
 
@@ -39,4 +41,4 @@ node scripts/snapshot.mjs          # writes data/snapshot.json (Node 22+)
 python3 -m http.server 8787        # then open http://localhost:8787
 ```
 
-Unofficial community tool. Not affiliated with the IdentityMD developer.
+An unofficial community tool, deliberately styled apart from the official IMD sites so it is never mistaken for one. Not affiliated with the IdentityMD developer.

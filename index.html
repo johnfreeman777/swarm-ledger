@@ -297,7 +297,7 @@ function rowsFor(wallet) {
 
 function tally(rows) {
   const un = rows.filter((r) => r.a.claimed === false).length;
-  return `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Tokens">${rows.length} launch${rows.length === 1 ? "" : "es"}</td><td data-l=""></td><td data-l=""></td><td data-l="Unclaimed" class="tallyun">${un} unclaimed</td><td data-l=""></td><td data-l=""></td></tr>`;
+  return `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Launches">${rows.length} launch${rows.length === 1 ? "" : "es"}</td><td data-l=""></td><td data-l=""></td><td data-l="Unclaimed" class="tallyun">${un} unclaimed</td><td data-l=""></td><td data-l=""></td></tr>`;
 }
 
 function renderWalletStats(wallet, rows, seats) {
