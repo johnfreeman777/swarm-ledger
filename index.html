@@ -3,147 +3,272 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IMD Rewards Tracker</title>
-<meta name="description" content="Swarm launch allocations, claim status and seat stats for any wallet. Read-only; never asks you to connect a wallet.">
+<title>IMD Rewards</title>
+<meta name="description" content="Who the swarm paid: launch allocations, claim status and seat stats for any IMD wallet. Read-only; never asks you to connect a wallet.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M16 7 25 16 16 25 7 16Z' fill='none' stroke='%23fff' stroke-width='2.5'/%3E%3C/svg%3E">
 <style>
 :root {
-  --bg: #f7f7f5; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e3de;
-  --accent: #2f6f4f; --accent-ink: #ffffff; --warn: #9a5b00; --warn-bg: #fff4e0;
-  --ok: #23734a; --ok-bg: #e5f4ea; --todo: #8a4b00; --todo-bg: #fdefd9; --unk-bg: #eeeeea;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --paper: #ffffff; --ink: #000000; --dim: #555555; --faint: #999999; --soft: #e6e6e6; --hover: #f4f4f4;
+  --ok: #1f9d55; --amber: #c98a00; --alarm: #b3261e; --bar: #000000;
+  --rule: 1.5px solid var(--ink);
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --gutter: clamp(16px, 4vw, 34px);
+  --label: 11px; --track: .06em;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121311; --panel: #1b1c1a; --ink: #ecece8; --muted: #9b9b94; --line: #2c2d2a;
-    --accent: #6fbf8f; --accent-ink: #0d1a12; --warn: #f0b75c; --warn-bg: #2b2112;
-    --ok: #7fd3a2; --ok-bg: #16281d; --todo: #f0b75c; --todo-bg: #2b2112; --unk-bg: #262724;
+    --paper: #0b0b0a; --ink: #f2f2ee; --dim: #a5a5a0; --faint: #6f6f6a; --soft: #2a2a27; --hover: #161615;
+    --ok: #3fcf7f; --amber: #ffb000; --alarm: #ff6b62; --bar: #f2f2ee;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #121311; --panel: #1b1c1a; --ink: #ecece8; --muted: #9b9b94; --line: #2c2d2a;
-  --accent: #6fbf8f; --accent-ink: #0d1a12; --warn: #f0b75c; --warn-bg: #2b2112;
-  --ok: #7fd3a2; --ok-bg: #16281d; --todo: #f0b75c; --todo-bg: #2b2112; --unk-bg: #262724;
+  --paper: #0b0b0a; --ink: #f2f2ee; --dim: #a5a5a0; --faint: #6f6f6a; --soft: #2a2a27; --hover: #161615;
+  --ok: #3fcf7f; --amber: #ffb000; --alarm: #ff6b62; --bar: #f2f2ee;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 980px; margin: 0 auto; padding: 28px 16px 60px; }
-h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
-h2 { font-size: 15px; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-p.lead { margin: 0 0 18px; color: var(--muted); }
-a { color: var(--accent); }
-form { display: flex; gap: 8px; flex-wrap: wrap; }
-input { flex: 1 1 320px; min-width: 0; padding: 11px 12px; font: 14px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-button { padding: 11px 18px; font: 600 14px system-ui, sans-serif; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
-button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 10px; font-weight: 500; font-size: 13px; }
-.note { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-.card .k { font-size: 12px; color: var(--muted); }
-.card .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { font-size: 12px; font-weight: 600; color: var(--muted); }
-tr:last-child td { border-bottom: 0; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.mono { font-family: var(--mono); font-size: 13px; }
-.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.pill.ok { background: var(--ok-bg); color: var(--ok); }
-.pill.todo { background: var(--todo-bg); color: var(--todo); }
-.pill.unk { background: var(--unk-bg); color: var(--muted); }
-.pill.test { background: var(--unk-bg); color: var(--muted); font-weight: 500; }
-.empty { padding: 16px; color: var(--muted); }
-footer { margin-top: 36px; font-size: 12px; color: var(--muted); }
-.row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-#status { font-size: 13px; color: var(--muted); min-height: 20px; margin-top: 8px; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); }
+body { font: 14px/1.55 var(--mono); -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-underline-offset: 3px; }
+a:hover { background: var(--hover); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 var(--gutter); }
+
+/* top bar, same grammar as the IMD explorer */
+header.bar { border-bottom: var(--rule); }
+header.bar .wrap { display: flex; align-items: stretch; justify-content: space-between; min-height: 52px; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .12em; text-decoration: none; }
+.brand .mark { width: 30px; height: 30px; border: var(--rule); display: grid; place-items: center; }
+.brand .mark svg { width: 14px; height: 14px; }
+.brand .sub { font-weight: 500; color: var(--dim); letter-spacing: var(--track); }
+nav { display: flex; align-items: stretch; }
+nav a, nav button { display: flex; align-items: center; padding: 0 14px; font: 500 var(--label)/1 var(--mono); letter-spacing: var(--track); text-transform: uppercase; text-decoration: none; color: var(--ink); background: none; border: 0; border-left: var(--rule); cursor: pointer; }
+nav button svg { width: 15px; height: 15px; }
+@media (max-width: 620px) { nav a.opt { display: none; } }
+
+.label { font-size: var(--label); letter-spacing: var(--track); text-transform: uppercase; color: var(--dim); font-weight: 500; }
+h1 { font-size: clamp(26px, 5vw, 44px); line-height: 1.08; letter-spacing: -.02em; margin: 34px 0 10px; font-weight: 600; }
+.lead { color: var(--dim); max-width: 72ch; margin: 0 0 22px; }
+
+form.q { display: flex; border: var(--rule); }
+form.q input { flex: 1; min-width: 0; height: 48px; padding: 0 14px; border: 0; background: var(--paper); color: var(--ink); font: 15px var(--mono); }
+form.q input:focus { outline: none; background: var(--hover); }
+form.q button { height: 48px; padding: 0 22px; border: 0; border-left: var(--rule); background: var(--ink); color: var(--paper); font: 600 var(--label) var(--mono); letter-spacing: var(--track); text-transform: uppercase; cursor: pointer; }
+form.q button:hover { opacity: .85; }
+.hint { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; font-size: 12px; color: var(--dim); }
+#status { min-height: 20px; }
+.hint .warn::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: 1px; }
+
+section { margin-top: 38px; }
+.sechead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: var(--rule); padding-bottom: 8px; margin-bottom: 0; }
+.sechead h2 { margin: 0; font-size: 13px; letter-spacing: var(--track); text-transform: uppercase; font-weight: 600; }
+.sechead .aside { font-size: 12px; color: var(--dim); }
+.linkbtn { font: 500 12px var(--mono); color: var(--ink); background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: var(--rule); }
+.stat { padding: 14px 16px 16px 0; }
+.stat + .stat { padding-left: 16px; border-left: 1px solid var(--soft); }
+.stat .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1.2; margin-top: 4px; }
+.stat .v small { font-size: 14px; color: var(--dim); font-weight: 500; }
+@media (max-width: 700px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--soft); }
+}
+
+.whoami { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 0; border-bottom: 1px solid var(--soft); }
+.whoami .addr { font-size: 15px; font-weight: 600; word-break: break-all; }
+
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: var(--label); letter-spacing: var(--track); text-transform: uppercase; color: var(--dim); font-weight: 500; padding: 12px 10px 8px 0; border-bottom: 1px solid var(--soft); }
+td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--soft); vertical-align: middle; }
+tr:hover td { background: var(--hover); }
+.r { text-align: right; font-variant-numeric: tabular-nums; }
+.dimtxt { color: var(--dim); }
+.sym { font-size: 12px; color: var(--dim); margin-left: 6px; }
+.tag { font-size: 10px; letter-spacing: var(--track); text-transform: uppercase; border: 1px solid var(--faint); color: var(--dim); padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+.lamp { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.lamp::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+.lamp.ok::before { background: var(--ok); }
+.lamp.todo::before { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent); }
+.meter { display: inline-block; width: 90px; height: 6px; background: var(--soft); vertical-align: middle; margin-right: 8px; position: relative; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--bar); }
+.addrbtn { font: 12px var(--mono); color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.empty { padding: 22px 0; color: var(--dim); }
+.walletlink { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* small screens: rows become stacked blocks */
+@media (max-width: 700px) {
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { padding: 10px 0; border-bottom: 1px solid var(--soft); }
+  table.stack td { border: 0; padding: 3px 0; display: flex; justify-content: space-between; gap: 12px; text-align: right; }
+  table.stack td::before { content: attr(data-l); font-size: var(--label); letter-spacing: var(--track); text-transform: uppercase; color: var(--dim); text-align: left; }
+  table.stack td .cv { text-align: right; }
+  table.stack td.first { font-weight: 600; font-size: 15px; }
+  table.stack td.first::before { content: none; }
+  tr:hover td { background: none; }
+}
+
+footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-size: 12px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 6px 22px; justify-content: space-between; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 8px 14px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.on { opacity: 1; }
+[hidden] { display: none !important; }
 </style>
 </head>
 <body>
-<main>
-  <h1>IMD Rewards Tracker</h1>
-  <p class="lead">Swarm launch allocations, claim status and seat stats for a wallet. This page only reads public data. It never asks you to connect a wallet or sign anything.</p>
+<header class="bar"><div class="wrap">
+  <a class="brand" href="./" id="home"><span class="mark"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1 13 7 7 13 1 7Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>IMD <span class="sub">/ REWARDS</span></a>
+  <nav>
+    <a class="opt" href="https://imd.fun" target="_blank" rel="noopener">imd.fun</a>
+    <a class="opt" href="https://explorer.imd.fun" target="_blank" rel="noopener">Explorer</a>
+    <a href="https://github.com/johnfreeman777/imd-rewards" target="_blank" rel="noopener">Source</a>
+    <button id="theme" type="button" aria-label="Switch light or dark"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor"/></svg></button>
+  </nav>
+</div></header>
 
-  <form id="f">
-    <input id="q" autocomplete="off" spellcheck="false" placeholder="0x… wallet address, or an NFT number like #51" aria-label="Wallet address or NFT number">
+<main class="wrap">
+  <h1>Who the swarm paid.</h1>
+  <p class="lead">Every token launch shares part of its supply with the agents that built it. Look up a wallet or an NFT to see its allocations, whether they are claimed, and how its seats are doing.</p>
+
+  <form class="q" id="f">
+    <input id="q" autocomplete="off" spellcheck="false" placeholder="0x… wallet or #NFT number" aria-label="Wallet address or NFT number">
     <button type="submit">Look up</button>
   </form>
-  <div id="status"></div>
-  <div class="note">Launches are on the Sepolia testnet right now. Test tokens have no value. Before claiming anywhere, check that the transaction goes to the distributor address shown here.</div>
+  <div class="hint"><span id="status"></span><span class="warn">Sepolia testnet: tokens have no value yet</span><span>No wallet connect. Read-only.</span></div>
 
-  <section id="out" hidden>
-    <h2>Summary</h2>
-    <div class="cards" id="cards"></div>
+  <div id="wallet" hidden>
+    <section>
+      <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a></div>
+      <div class="stats" id="wstats"></div>
+    </section>
 
-    <div class="row"><h2>Allocations</h2><button class="ghost" id="recheck" type="button">Re-check claims on chain</button></div>
-    <div class="tablewrap"><table>
-      <thead><tr><th>Launch</th><th>Token</th><th>Network</th><th class="num">Amount</th><th class="num">Share</th><th>Status</th><th>Claim page</th><th>Distributor</th></tr></thead>
-      <tbody id="alloc"></tbody>
-    </table></div>
+    <section>
+      <div class="sechead"><h2>Allocations</h2><span class="aside"><span id="live"></span> <button class="linkbtn" id="recheck" type="button">re-check on chain</button></span></div>
+      <table class="stack"><thead><tr><th>Launch</th><th>Token</th><th class="r">Amount</th><th class="r">Share</th><th>Status</th><th>Claim</th><th>Distributor</th></tr></thead><tbody id="alloc"></tbody></table>
+    </section>
 
-    <h2>Seats</h2>
-    <div class="tablewrap"><table>
-      <thead><tr><th>NFT</th><th class="num">Accepted</th><th class="num">Attempts</th><th class="num">Rejected</th><th class="num">Hours</th><th class="num">Rank</th><th></th></tr></thead>
-      <tbody id="seats"></tbody>
-    </table></div>
-  </section>
+    <section>
+      <div class="sechead"><h2>Seats</h2><span class="aside">accepted = verifier-accepted submissions</span></div>
+      <table class="stack"><thead><tr><th>NFT</th><th class="r">Accepted</th><th class="r">Attempts</th><th>Acceptance</th><th class="r">Hours</th><th class="r">Rank</th><th></th></tr></thead><tbody id="seats"></tbody></table>
+    </section>
+  </div>
 
-  <h2>Network</h2>
-  <div class="cards" id="net"></div>
+  <div id="landing">
+    <section>
+      <div class="sechead"><h2>Network</h2><span class="aside" id="snapage"></span></div>
+      <div class="stats" id="nstats"></div>
+    </section>
 
-  <footer id="foot">Unofficial community tool. Data: api.imd.fun, snapshotted on a schedule, plus live reads from public RPC. Not affiliated with the IdentityMD developer.</footer>
+    <section>
+      <div class="sechead"><h2>Recent launches</h2><span class="aside">claimed share of the swarm allocation</span></div>
+      <table class="stack"><thead><tr><th>Launch</th><th>Token</th><th>Date</th><th class="r">Recipients</th><th>Claimed</th><th>Claim</th></tr></thead><tbody id="launches"></tbody></table>
+    </section>
+
+    <section>
+      <div class="sechead"><h2>Most allocations</h2><span class="aside">wallets by number of launches that paid them</span></div>
+      <table class="stack"><thead><tr><th>Wallet</th><th class="r">Launches</th><th class="r">Unclaimed</th><th class="r">Seats</th><th class="r">Accepted</th></tr></thead><tbody id="top"></tbody></table>
+    </section>
+  </div>
+
+  <footer><span>Unofficial community tool. Not affiliated with the IdentityMD developer.</span><span id="foot"></span></footer>
 </main>
+<div class="toast" id="toast"></div>
 
 <script>
 "use strict";
+// On GitHub Pages or localhost the snapshot sits next to the page; any other host
+// (e.g. an IPFS copy under the network's name) reads the one GitHub Pages keeps fresh.
+const LOCAL = /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
+const DATA_URL = LOCAL ? "data/snapshot.json" : "https://johnfreeman777.github.io/imd-rewards/data/snapshot.json";
 const RPC = { 1: "https://ethereum-rpc.publicnode.com", 11155111: "https://ethereum-sepolia-rpc.publicnode.com" };
-const NET = { 1: "Ethereum", 11155111: "Sepolia" };
+const CLAIMED_SEL = "0x120aa877"; // claimed(uint256 round, address account)
 const $ = (id) => document.getElementById(id);
 let snap = null, current = null;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const short = (a) => a ? a.slice(0, 6) + "…" + a.slice(-4) : "";
+const short = (a) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const isAddr = (s) => /^0x[0-9a-fA-F]{40}$/.test(s);
-function fmtUnits(raw, decimals = 18, digits = 0) {
+const num = (n) => Number(n).toLocaleString("en-US");
+function units(raw, decimals = 18) {
+  try { return (BigInt(raw) / 10n ** BigInt(decimals)).toLocaleString("en-US"); } catch { return "?"; }
+}
+function compact(raw, decimals = 18) {
   try {
-    const v = BigInt(raw), base = 10n ** BigInt(decimals);
-    const whole = v / base, frac = v % base;
-    let s = whole.toLocaleString("en-US");
-    if (digits > 0) s += "." + (frac * 10n ** BigInt(digits) / base).toString().padStart(digits, "0");
-    return s;
+    const v = Number(BigInt(raw) / 10n ** BigInt(decimals));
+    return v >= 1e9 ? (v / 1e9).toFixed(2) + "B" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v);
   } catch { return "?"; }
 }
 const pct = (bps) => (Number(bps) / 100).toFixed(2) + "%";
-const card = (k, v) => `<div class="card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
-const explorer = (chainId) => (snap?.explorers?.[chainId] ?? "https://etherscan.io");
+const explorer = (c) => snap?.explorers?.[c] ?? "https://etherscan.io";
+const stat = (k, v, sub = "") => `<div class="stat"><div class="label">${esc(k)}</div><div class="v">${esc(v)}${sub ? ` <small>${esc(sub)}</small>` : ""}</div></div>`;
+const lamp = (c) => c === true ? '<span class="lamp ok">claimed</span>' : c === false ? '<span class="lamp todo">unclaimed</span>' : '<span class="lamp">unknown</span>';
+const bar = (f) => `<span class="meter"><i style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(1)}%"></i></span>${(f * 100).toFixed(0)}%`;
+const netTag = (c) => (c === 1 ? "" : '<span class="tag">test</span>');
 function ago(iso) {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
-function statusPill(a) {
-  if (a.claimed === true) return '<span class="pill ok">Claimed</span>';
-  if (a.claimed === false) return '<span class="pill todo">Unclaimed</span>';
-  return '<span class="pill unk">Unknown</span>';
-}
+const day = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
 function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("on"); setTimeout(() => el.classList.remove("on"), 1400); }
+async function copy(t) { try { await navigator.clipboard.writeText(t); toast("copied"); } catch { toast(t); } }
 
-async function loadSnapshot() {
-  const r = await fetch("data/snapshot.json", { cache: "no-cache" });
-  if (!r.ok) throw new Error("snapshot HTTP " + r.status);
-  snap = await r.json();
-  renderNetwork();
+// theme: explicit choice wins over the system setting
+(function () {
+  const saved = load("imd-rewards-theme");
+  if (saved) document.documentElement.dataset.theme = saved;
+  $("theme").addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next; store("imd-rewards-theme", next);
+  });
+})();
+
+function renderLanding() {
+  const n = snap.network, res = snap.nodeReserve;
+  $("nstats").innerHTML = [
+    n ? stat("Agents online", num(n.online), `/ ${num(n.enrolled)}`) : "",
+    n ? stat("Accepted, 24 h", num(n.acceptedLastDay)) : "",
+    stat("Launches", num(snap.launches.length)),
+    res ? stat("NFT-node reserve", compact(res.held), "IMD") : "",
+  ].join("");
+  $("snapage").textContent = `snapshot ${ago(snap.generatedAt)}`;
+  $("foot").textContent = `Data: api.imd.fun, snapshot every 30 min · live claim checks via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+
+  const withAlloc = snap.launches.filter((l) => l.allocations.length);
+  $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
+    const f = l.funded && l.funded !== "0" ? Number(BigInt(l.claimedTotal ?? "0") * 10000n / BigInt(l.funded)) / 10000 : null;
+    return `<tr><td class="first" data-l="Launch">#${l.number}</td>
+      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}</td>
+      <td data-l="Date" class="dimtxt">${day(l.createdAt)}</td>
+      <td data-l="Recipients" class="r">${l.allocations.length}</td>
+      <td data-l="Claimed">${f === null ? '<span class="dimtxt">—</span>' : bar(f)}</td>
+      <td data-l="Claim">${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open ↗</a>` : '<span class="dimtxt">—</span>'}</td></tr>`;
+  }).join("") || `<tr><td class="empty" colspan="6">No launches with allocations yet.</td></tr>`;
+  wrapCells($("launches"));
+
+  const byWallet = new Map();
+  for (const l of snap.launches) for (const a of l.allocations) {
+    const w = byWallet.get(a.wallet) ?? { wallet: a.wallet, launches: 0, unclaimed: 0 };
+    w.launches++; if (a.claimed === false) w.unclaimed++; byWallet.set(a.wallet, w);
+  }
+  for (const s of snap.seats) { const w = byWallet.get(s.wallet); if (w) { w.seats = (w.seats ?? 0) + 1; w.accepted = (w.accepted ?? 0) + s.accepted; } }
+  const top = [...byWallet.values()].sort((a, b) => b.launches - a.launches || (b.accepted ?? 0) - (a.accepted ?? 0)).slice(0, 10);
+  $("top").innerHTML = top.map((w) => `<tr><td class="first" data-l="Wallet"><button class="walletlink" data-w="${w.wallet}">${short(w.wallet)}</button></td>
+      <td data-l="Launches" class="r">${w.launches}</td><td data-l="Unclaimed" class="r">${w.unclaimed}</td>
+      <td data-l="Seats" class="r">${w.seats ?? 0}</td><td data-l="Accepted" class="r">${num(w.accepted ?? 0)}</td></tr>`).join("");
+  wrapCells($("top"));
 }
 
-function renderNetwork() {
-  const n = snap.network, res = snap.nodeReserve;
-  $("net").innerHTML = [
-    n ? card("Agents online", `${n.online} / ${n.enrolled}`) : "",
-    n ? card("Accepted, last 24 h", n.acceptedLastDay.toLocaleString("en-US")) : "",
-    card("Launches tracked", snap.launches.length),
-    res ? card("NFT-node reserve (IMD)", fmtUnits(res.held, 18, 0)) : "",
-  ].join("");
-  $("foot").textContent = `Unofficial community tool. Snapshot ${ago(snap.generatedAt)} (${new Date(snap.generatedAt).toUTCString()}) from api.imd.fun, plus live reads from public RPC. The NFT-node reserve is IMD set aside by POOL4 for nodes; no payout contract has shipped yet. Not affiliated with the IdentityMD developer.`;
+// one wrapper per cell, so the small-screen layout keeps a cell's pieces together
+function wrapCells(tbody) {
+  for (const td of tbody.querySelectorAll("td")) {
+    if (td.classList.contains("empty") || td.firstElementChild?.classList.contains("cv")) continue;
+    td.innerHTML = `<span class="cv">${td.innerHTML}</span>`;
+  }
 }
 
 function resolveWallet(input) {
@@ -154,86 +279,115 @@ function resolveWallet(input) {
   return null;
 }
 
+function rowsFor(wallet) {
+  const rows = [];
+  for (const l of snap.launches) for (const a of l.allocations) if (a.wallet === wallet) rows.push({ l, a });
+  return rows;
+}
+
+function renderWalletStats(wallet, rows, seats) {
+  const unclaimed = rows.filter((r) => r.a.claimed === false).length;
+  $("wstats").innerHTML = [
+    stat("Seats", seats.length),
+    stat("Accepted tasks", num(seats.reduce((n, s) => n + s.accepted, 0))),
+    stat("Allocations", rows.length),
+    stat("Unclaimed", unclaimed),
+  ].join("");
+}
+
+function showLanding() {
+  current = null; $("wallet").hidden = true; $("landing").hidden = false; $("status").textContent = "";
+  history.replaceState(null, "", location.pathname);
+}
+
 function lookup(input) {
   const wallet = resolveWallet(input);
-  if (!wallet) { $("status").textContent = "Enter a 0x wallet address, or the number of an NFT that has worked on the network."; $("out").hidden = true; return; }
+  if (!wallet) { $("status").textContent = "Enter a 0x wallet, or the number of an NFT that has worked on the network."; return; }
   current = wallet;
   history.replaceState(null, "", "#" + wallet);
   store("imd-rewards-wallet", wallet);
+  $("q").value = input.trim();
 
-  const rows = [];
-  for (const l of snap.launches) for (const a of l.allocations) if (a.wallet === wallet) rows.push({ l, a });
+  const rows = rowsFor(wallet);
   const seats = snap.seats.filter((s) => s.wallet === wallet).sort((a, b) => b.accepted - a.accepted);
-
-  const unclaimed = rows.filter((r) => r.a.claimed === false).length;
-  $("cards").innerHTML = [
-    card("Seats", seats.length),
-    card("Accepted tasks", seats.reduce((n, s) => n + s.accepted, 0).toLocaleString("en-US")),
-    card("Launch allocations", rows.length),
-    card("Unclaimed", unclaimed),
-  ].join("");
+  $("waddr").textContent = wallet;
+  $("wscan").href = `https://etherscan.io/address/${wallet}`;
+  renderWalletStats(wallet, rows, seats);
 
   $("alloc").innerHTML = rows.length ? rows.map(({ l, a }) => {
-    const ex = explorer(l.chainId);
-    const tok = l.token ? `${esc(l.token.name)} <span class="mono">${esc(l.token.symbol ?? "")}</span>` : "—";
     const sweep = l.sweepAfter ? ` title="Unclaimed tokens can be swept to the treasury after ${new Date(l.sweepAfter * 1000).toDateString()}"` : "";
     return `<tr data-launch="${l.number}">
-      <td>#${l.number}</td><td>${tok}</td>
-      <td>${esc(NET[l.chainId] ?? l.chainId)} ${l.chainId !== 1 ? '<span class="pill test">test</span>' : ""}</td>
-      <td class="num">${fmtUnits(a.amount, l.token?.decimals ?? 18)}</td><td class="num">${pct(a.bps)}</td>
-      <td class="st"${sweep}>${statusPill(a)}</td>
-      <td>${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open</a>` : "—"}</td>
-      <td>${l.distributor ? `<a class="mono" href="${ex}/address/${esc(l.distributor)}" target="_blank" rel="noopener">${short(l.distributor)}</a>` : "—"}</td></tr>`;
-  }).join("") : `<tr><td class="empty" colspan="8">No launch allocations for this wallet yet.</td></tr>`;
+      <td class="first" data-l="Launch">#${l.number}</td>
+      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}</td>
+      <td data-l="Amount" class="r">${units(a.amount, l.token?.decimals ?? 18)}</td>
+      <td data-l="Share" class="r">${pct(a.bps)}</td>
+      <td data-l="Status" class="st"${sweep}>${lamp(a.claimed)}</td>
+      <td data-l="Claim">${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open ↗</a>` : '<span class="dimtxt">—</span>'}</td>
+      <td data-l="Distributor">${l.distributor ? `<button class="addrbtn" data-copy="${esc(l.distributor)}" title="copy full address">${short(l.distributor)}</button> <a class="dimtxt" href="${explorer(l.chainId)}/address/${esc(l.distributor)}" target="_blank" rel="noopener" aria-label="open in explorer">↗</a>` : '<span class="dimtxt">—</span>'}</td></tr>`;
+  }).join("") : `<tr><td class="empty" colspan="7">No launch allocations for this wallet yet. Allocations go to seats that did good work around a launch.</td></tr>`;
 
-  $("seats").innerHTML = seats.length ? seats.map((s) => `<tr>
-      <td>#${esc(s.tokenId)}</td><td class="num">${s.accepted}</td><td class="num">${s.attempts}</td><td class="num">${s.rejected}</td>
-      <td class="num">${s.hours}</td><td class="num">${s.rank} / ${snap.seatCount}</td>
-      <td><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer</a></td></tr>`).join("")
-    : `<tr><td class="empty" colspan="7">No seats from this wallet have worked on the network.</td></tr>`;
+  $("seats").innerHTML = seats.length ? seats.map((s) => {
+    const f = s.attempts ? s.accepted / s.attempts : 0;
+    return `<tr><td class="first" data-l="NFT">#${esc(s.tokenId)}</td>
+      <td data-l="Accepted" class="r">${num(s.accepted)}</td><td data-l="Attempts" class="r">${num(s.attempts)}</td>
+      <td data-l="Acceptance">${bar(f)}</td><td data-l="Hours" class="r">${s.hours}</td>
+      <td data-l="Rank" class="r">${s.rank}<span class="dimtxt"> / ${snap.seatCount}</span></td>
+      <td data-l="Agent"><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer ↗</a></td></tr>`;
+  }).join("") : `<tr><td class="empty" colspan="7">No seat from this wallet has worked on the network yet.</td></tr>`;
+  wrapCells($("alloc")); wrapCells($("seats"));
 
-  $("out").hidden = false;
-  $("status").textContent = `Wallet ${short(wallet)}: ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}.`;
+  $("landing").hidden = true; $("wallet").hidden = false;
+  $("status").textContent = `${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`;
+  $("live").textContent = `snapshot ${ago(snap.generatedAt)}`;
   if (rows.some((r) => r.a.claimed !== true)) recheck();
 }
 
-// Live check of claimed(0, wallet) against each distributor, straight from public RPC.
+// live claimed(0, wallet) against each distributor, straight from public RPC
 async function recheck() {
   if (!current) return;
   const wallet = current;
-  const rows = [];
-  for (const l of snap.launches) for (const a of l.allocations) if (a.wallet === wallet && l.distributor && RPC[l.chainId]) rows.push({ l, a });
+  const rows = rowsFor(wallet).filter((r) => r.l.distributor && RPC[r.l.chainId]);
   if (!rows.length) return;
-  $("status").textContent = "Checking claims on chain…";
+  $("live").textContent = "checking on chain…";
   const byChain = {};
-  rows.forEach((r, i) => (byChain[r.l.chainId] ??= []).push({ ...r, i }));
+  rows.forEach((r) => (byChain[r.l.chainId] ??= []).push(r));
   let checked = 0;
   for (const [chainId, list] of Object.entries(byChain)) {
     const body = list.map((r, id) => ({ jsonrpc: "2.0", id, method: "eth_call",
-      params: [{ to: r.l.distributor, data: "0x120aa877" + "0".repeat(64) + wallet.slice(2).padStart(64, "0") }, "latest"] }));
+      params: [{ to: r.l.distributor, data: CLAIMED_SEL + "0".repeat(64) + wallet.slice(2).padStart(64, "0") }, "latest"] }));
     try {
       const res = await (await fetch(RPC[chainId], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
       for (const x of res) {
         if (typeof x.result !== "string" || x.result === "0x") continue;
         const r = list[x.id]; r.a.claimed = BigInt(x.result) === 1n; checked++;
         const cell = document.querySelector(`tr[data-launch="${r.l.number}"] .st`);
-        if (cell) cell.innerHTML = statusPill(r.a);
+        if (cell) (cell.querySelector(".cv") ?? cell).innerHTML = lamp(r.a.claimed);
       }
     } catch { /* keep snapshot values */ }
   }
   if (current !== wallet) return;
-  const unclaimed = rows.filter((r) => r.a.claimed === false).length;
-  const cards = $("cards").children; if (cards[3]) cards[3].querySelector(".v").textContent = unclaimed;
-  $("status").textContent = checked ? `Claim status checked live on chain just now (${checked} of ${rows.length}).` : "Live check failed; showing snapshot values.";
+  renderWalletStats(wallet, rowsFor(wallet), snap.seats.filter((s) => s.wallet === wallet));
+  $("live").textContent = checked ? `checked on chain just now (${checked}/${rows.length})` : `live check failed · snapshot ${ago(snap.generatedAt)}`;
 }
 
-$("f").addEventListener("submit", (e) => { e.preventDefault(); if (snap) lookup($("q").value); });
+document.addEventListener("click", (e) => {
+  const w = e.target.closest("[data-w]"); if (w) { lookup(w.dataset.w); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+  const c = e.target.closest("[data-copy]"); if (c) copy(c.dataset.copy);
+});
+$("f").addEventListener("submit", (e) => { e.preventDefault(); if (snap) { $("q").value.trim() ? lookup($("q").value) : showLanding(); } });
 $("recheck").addEventListener("click", recheck);
+$("wcopy").addEventListener("click", () => current && copy(current));
+$("home").addEventListener("click", (e) => { if (snap) { e.preventDefault(); $("q").value = ""; showLanding(); } });
 
-loadSnapshot().then(() => {
-  const start = decodeURIComponent(location.hash.slice(1)) || load("imd-rewards-wallet") || "";
-  if (start) { $("q").value = start; lookup(start); }
-}).catch((e) => { $("status").textContent = "Could not load the snapshot: " + e.message; });
+fetch(DATA_URL, { cache: "no-cache" })
+  .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  .then((d) => {
+    snap = d; renderLanding();
+    const start = decodeURIComponent(location.hash.slice(1));
+    if (start) lookup(start);
+    else { const last = load("imd-rewards-wallet"); if (last) $("q").value = last; }
+  })
+  .catch((e) => { $("status").textContent = "Could not load data: " + e.message; });
 </script>
 </body>
 </html>
