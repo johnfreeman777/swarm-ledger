@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMD Rewards Tracker</title>
+<meta name="description" content="Swarm launch allocations, claim status and seat stats for any wallet. Read-only; never asks you to connect a wallet.">
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e3de;
+  --accent: #2f6f4f; --accent-ink: #ffffff; --warn: #9a5b00; --warn-bg: #fff4e0;
+  --ok: #23734a; --ok-bg: #e5f4ea; --todo: #8a4b00; --todo-bg: #fdefd9; --unk-bg: #eeeeea;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121311; --panel: #1b1c1a; --ink: #ecece8; --muted: #9b9b94; --line: #2c2d2a;
+    --accent: #6fbf8f; --accent-ink: #0d1a12; --warn: #f0b75c; --warn-bg: #2b2112;
+    --ok: #7fd3a2; --ok-bg: #16281d; --todo: #f0b75c; --todo-bg: #2b2112; --unk-bg: #262724;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121311; --panel: #1b1c1a; --ink: #ecece8; --muted: #9b9b94; --line: #2c2d2a;
+  --accent: #6fbf8f; --accent-ink: #0d1a12; --warn: #f0b75c; --warn-bg: #2b2112;
+  --ok: #7fd3a2; --ok-bg: #16281d; --todo: #f0b75c; --todo-bg: #2b2112; --unk-bg: #262724;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 28px 16px 60px; }
+h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+p.lead { margin: 0 0 18px; color: var(--muted); }
+a { color: var(--accent); }
+form { display: flex; gap: 8px; flex-wrap: wrap; }
+input { flex: 1 1 320px; min-width: 0; padding: 11px 12px; font: 14px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { padding: 11px 18px; font: 600 14px system-ui, sans-serif; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 10px; font-weight: 500; font-size: 13px; }
+.note { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.card .k { font-size: 12px; color: var(--muted); }
+.card .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.todo { background: var(--todo-bg); color: var(--todo); }
+.pill.unk { background: var(--unk-bg); color: var(--muted); }
+.pill.test { background: var(--unk-bg); color: var(--muted); font-weight: 500; }
+.empty { padding: 16px; color: var(--muted); }
+footer { margin-top: 36px; font-size: 12px; color: var(--muted); }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#status { font-size: 13px; color: var(--muted); min-height: 20px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>IMD Rewards Tracker</h1>
+  <p class="lead">Swarm launch allocations, claim status and seat stats for a wallet. This page only reads public data. It never asks you to connect a wallet or sign anything.</p>
+
+  <form id="f">
+    <input id="q" autocomplete="off" spellcheck="false" placeholder="0x… wallet address, or an NFT number like #51" aria-label="Wallet address or NFT number">
+    <button type="submit">Look up</button>
+  </form>
+  <div id="status"></div>
+  <div class="note">Launches are on the Sepolia testnet right now. Test tokens have no value. Before claiming anywhere, check that the transaction goes to the distributor address shown here.</div>
+
+  <section id="out" hidden>
+    <h2>Summary</h2>
+    <div class="cards" id="cards"></div>
+
+    <div class="row"><h2>Allocations</h2><button class="ghost" id="recheck" type="button">Re-check claims on chain</button></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Launch</th><th>Token</th><th>Network</th><th class="num">Amount</th><th class="num">Share</th><th>Status</th><th>Claim page</th><th>Distributor</th></tr></thead>
+      <tbody id="alloc"></tbody>
+    </table></div>
+
+    <h2>Seats</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>NFT</th><th class="num">Accepted</th><th class="num">Attempts</th><th class="num">Rejected</th><th class="num">Hours</th><th class="num">Rank</th><th></th></tr></thead>
+      <tbody id="seats"></tbody>
+    </table></div>
+  </section>
+
+  <h2>Network</h2>
+  <div class="cards" id="net"></div>
+
+  <footer id="foot">Unofficial community tool. Data: api.imd.fun, snapshotted on a schedule, plus live reads from public RPC. Not affiliated with the IdentityMD developer.</footer>
+</main>
+
+<script>
+"use strict";
+const RPC = { 1: "https://ethereum-rpc.publicnode.com", 11155111: "https://ethereum-sepolia-rpc.publicnode.com" };
+const NET = { 1: "Ethereum", 11155111: "Sepolia" };
+const $ = (id) => document.getElementById(id);
+let snap = null, current = null;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = (a) => a ? a.slice(0, 6) + "…" + a.slice(-4) : "";
+const isAddr = (s) => /^0x[0-9a-fA-F]{40}$/.test(s);
+function fmtUnits(raw, decimals = 18, digits = 0) {
+  try {
+    const v = BigInt(raw), base = 10n ** BigInt(decimals);
+    const whole = v / base, frac = v % base;
+    let s = whole.toLocaleString("en-US");
+    if (digits > 0) s += "." + (frac * 10n ** BigInt(digits) / base).toString().padStart(digits, "0");
+    return s;
+  } catch { return "?"; }
+}
+const pct = (bps) => (Number(bps) / 100).toFixed(2) + "%";
+const card = (k, v) => `<div class="card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
+const explorer = (chainId) => (snap?.explorers?.[chainId] ?? "https://etherscan.io");
+function ago(iso) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+}
+function statusPill(a) {
+  if (a.claimed === true) return '<span class="pill ok">Claimed</span>';
+  if (a.claimed === false) return '<span class="pill todo">Unclaimed</span>';
+  return '<span class="pill unk">Unknown</span>';
+}
+function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
+function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+
+async function loadSnapshot() {
+  const r = await fetch("data/snapshot.json", { cache: "no-cache" });
+  if (!r.ok) throw new Error("snapshot HTTP " + r.status);
+  snap = await r.json();
+  renderNetwork();
+}
+
+function renderNetwork() {
+  const n = snap.network, res = snap.nodeReserve;
+  $("net").innerHTML = [
+    n ? card("Agents online", `${n.online} / ${n.enrolled}`) : "",
+    n ? card("Accepted, last 24 h", n.acceptedLastDay.toLocaleString("en-US")) : "",
+    card("Launches tracked", snap.launches.length),
+    res ? card("NFT-node reserve (IMD)", fmtUnits(res.held, 18, 0)) : "",
+  ].join("");
+  $("foot").textContent = `Unofficial community tool. Snapshot ${ago(snap.generatedAt)} (${new Date(snap.generatedAt).toUTCString()}) from api.imd.fun, plus live reads from public RPC. The NFT-node reserve is IMD set aside by POOL4 for nodes; no payout contract has shipped yet. Not affiliated with the IdentityMD developer.`;
+}
+
+function resolveWallet(input) {
+  const s = input.trim();
+  if (isAddr(s)) return s.toLowerCase();
+  const m = s.match(/^#?(\d{1,4})$/);
+  if (m) { const seat = snap.seats.find((x) => x.tokenId === m[1]); return seat ? seat.wallet : null; }
+  return null;
+}
+
+function lookup(input) {
+  const wallet = resolveWallet(input);
+  if (!wallet) { $("status").textContent = "Enter a 0x wallet address, or the number of an NFT that has worked on the network."; $("out").hidden = true; return; }
+  current = wallet;
+  history.replaceState(null, "", "#" + wallet);
+  store("imd-rewards-wallet", wallet);
+
+  const rows = [];
+  for (const l of snap.launches) for (const a of l.allocations) if (a.wallet === wallet) rows.push({ l, a });
+  const seats = snap.seats.filter((s) => s.wallet === wallet).sort((a, b) => b.accepted - a.accepted);
+
+  const unclaimed = rows.filter((r) => r.a.claimed === false).length;
+  $("cards").innerHTML = [
+    card("Seats", seats.length),
+    card("Accepted tasks", seats.reduce((n, s) => n + s.accepted, 0).toLocaleString("en-US")),
+    card("Launch allocations", rows.length),
+    card("Unclaimed", unclaimed),
+  ].join("");
+
+  $("alloc").innerHTML = rows.length ? rows.map(({ l, a }) => {
+    const ex = explorer(l.chainId);
+    const tok = l.token ? `${esc(l.token.name)} <span class="mono">${esc(l.token.symbol ?? "")}</span>` : "—";
+    const sweep = l.sweepAfter ? ` title="Unclaimed tokens can be swept to the treasury after ${new Date(l.sweepAfter * 1000).toDateString()}"` : "";
+    return `<tr data-launch="${l.number}">
+      <td>#${l.number}</td><td>${tok}</td>
+      <td>${esc(NET[l.chainId] ?? l.chainId)} ${l.chainId !== 1 ? '<span class="pill test">test</span>' : ""}</td>
+      <td class="num">${fmtUnits(a.amount, l.token?.decimals ?? 18)}</td><td class="num">${pct(a.bps)}</td>
+      <td class="st"${sweep}>${statusPill(a)}</td>
+      <td>${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open</a>` : "—"}</td>
+      <td>${l.distributor ? `<a class="mono" href="${ex}/address/${esc(l.distributor)}" target="_blank" rel="noopener">${short(l.distributor)}</a>` : "—"}</td></tr>`;
+  }).join("") : `<tr><td class="empty" colspan="8">No launch allocations for this wallet yet.</td></tr>`;
+
+  $("seats").innerHTML = seats.length ? seats.map((s) => `<tr>
+      <td>#${esc(s.tokenId)}</td><td class="num">${s.accepted}</td><td class="num">${s.attempts}</td><td class="num">${s.rejected}</td>
+      <td class="num">${s.hours}</td><td class="num">${s.rank} / ${snap.seatCount}</td>
+      <td><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer</a></td></tr>`).join("")
+    : `<tr><td class="empty" colspan="7">No seats from this wallet have worked on the network.</td></tr>`;
+
+  $("out").hidden = false;
+  $("status").textContent = `Wallet ${short(wallet)}: ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}.`;
+  if (rows.some((r) => r.a.claimed !== true)) recheck();
+}
+
+// Live check of claimed(0, wallet) against each distributor, straight from public RPC.
+async function recheck() {
+  if (!current) return;
+  const wallet = current;
+  const rows = [];
+  for (const l of snap.launches) for (const a of l.allocations) if (a.wallet === wallet && l.distributor && RPC[l.chainId]) rows.push({ l, a });
+  if (!rows.length) return;
+  $("status").textContent = "Checking claims on chain…";
+  const byChain = {};
+  rows.forEach((r, i) => (byChain[r.l.chainId] ??= []).push({ ...r, i }));
+  let checked = 0;
+  for (const [chainId, list] of Object.entries(byChain)) {
+    const body = list.map((r, id) => ({ jsonrpc: "2.0", id, method: "eth_call",
+      params: [{ to: r.l.distributor, data: "0x120aa877" + "0".repeat(64) + wallet.slice(2).padStart(64, "0") }, "latest"] }));
+    try {
+      const res = await (await fetch(RPC[chainId], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+      for (const x of res) {
+        if (typeof x.result !== "string" || x.result === "0x") continue;
+        const r = list[x.id]; r.a.claimed = BigInt(x.result) === 1n; checked++;
+        const cell = document.querySelector(`tr[data-launch="${r.l.number}"] .st`);
+        if (cell) cell.innerHTML = statusPill(r.a);
+      }
+    } catch { /* keep snapshot values */ }
+  }
+  if (current !== wallet) return;
+  const unclaimed = rows.filter((r) => r.a.claimed === false).length;
+  const cards = $("cards").children; if (cards[3]) cards[3].querySelector(".v").textContent = unclaimed;
+  $("status").textContent = checked ? `Claim status checked live on chain just now (${checked} of ${rows.length}).` : "Live check failed; showing snapshot values.";
+}
+
+$("f").addEventListener("submit", (e) => { e.preventDefault(); if (snap) lookup($("q").value); });
+$("recheck").addEventListener("click", recheck);
+
+loadSnapshot().then(() => {
+  const start = decodeURIComponent(location.hash.slice(1)) || load("imd-rewards-wallet") || "";
+  if (start) { $("q").value = start; lookup(start); }
+}).catch((e) => { $("status").textContent = "Could not load the snapshot: " + e.message; });
+</script>
+</body>
+</html>
