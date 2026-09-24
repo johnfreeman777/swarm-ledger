@@ -19,7 +19,9 @@ no way to sign or send a transaction.
 `api.imd.fun` does not allow cross-origin requests from browsers, so the page cannot
 read it directly. Instead:
 
-1. **`scripts/snapshot.mjs`** runs every 30 minutes in GitHub Actions. It reads
+1. **`scripts/snapshot.mjs`** runs on a GitHub Actions schedule. It is set to every 30
+   minutes, but GitHub throttles schedules on small repositories, so in practice it
+   runs several times a day. It reads
    `/launches`, `/sites` and `/contributors` from the public API. It then asks each
    launch's MerkleDistributor `claimed(0, wallet)` for every allocation, plus the
    round data, and writes one JSON file.

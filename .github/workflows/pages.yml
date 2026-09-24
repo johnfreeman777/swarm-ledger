@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
+    # requested every 30 min; GitHub throttles this on small repos (a few runs a day in practice)
     - cron: "*/30 * * * *"
   workflow_dispatch:
 

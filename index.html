@@ -246,7 +246,7 @@ function renderLanding() {
     res ? stat("NFT-node reserve", compact(res.held), "IMD") : "",
   ].join("");
   $("snapage").textContent = `snapshot ${ago(snap.generatedAt)}`;
-  $("foot").textContent = `Data: api.imd.fun, snapshot every 30 min · live claim checks via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+  $("foot").textContent = `Data: api.imd.fun, refreshed several times a day · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
 
   const withAlloc = snap.launches.filter((l) => l.allocations.length);
   $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
