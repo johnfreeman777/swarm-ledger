@@ -12,7 +12,7 @@
 <style>
 :root {
   --paper: #ffffff; --ink: #000000; --dim: #555555; --faint: #999999; --soft: #e6e6e6; --hover: #f4f4f4;
-  --ok: #1f9d55; --amber: #c98a00; --alarm: #b3261e; --accent: #1f9d55; --accent-ink: #ffffff; --accent-soft: #e3f3ea;
+  --ok: #1f9d55; --amber: #c98a00; --amber-ink: #8a5a00; --alarm: #b3261e; --accent: #1f9d55; --accent-ink: #ffffff; --accent-soft: #e3f3ea;
   --rule: 1.5px solid var(--ink);
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --gutter: clamp(16px, 4vw, 34px);
@@ -21,12 +21,12 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #0b0b0a; --ink: #f2f2ee; --dim: #a5a5a0; --faint: #6f6f6a; --soft: #2a2a27; --hover: #161615;
-    --ok: #3fcf7f; --amber: #ffb000; --alarm: #ff6b62; --accent: #3fcf7f; --accent-ink: #06170d; --accent-soft: #10271a;
+    --ok: #3fcf7f; --amber: #ffb000; --amber-ink: #ffb000; --alarm: #ff6b62; --accent: #3fcf7f; --accent-ink: #06170d; --accent-soft: #10271a;
   }
 }
 :root[data-theme="dark"] {
   --paper: #0b0b0a; --ink: #f2f2ee; --dim: #a5a5a0; --faint: #6f6f6a; --soft: #2a2a27; --hover: #161615;
-  --ok: #3fcf7f; --amber: #ffb000; --alarm: #ff6b62; --accent: #3fcf7f; --accent-ink: #06170d; --accent-soft: #10271a;
+  --ok: #3fcf7f; --amber: #ffb000; --amber-ink: #ffb000; --alarm: #ff6b62; --accent: #3fcf7f; --accent-ink: #06170d; --accent-soft: #10271a;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--paper); color: var(--ink); }
@@ -60,7 +60,9 @@ form.q button { height: 48px; padding: 0 22px; border: 0; border-left: var(--rul
 form.q button:hover { opacity: .85; }
 .hint { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; font-size: 12px; color: var(--dim); }
 #status { min-height: 20px; }
-#status.err { color: var(--alarm); font-weight: 600; }
+#status.err, #status.note { flex-basis: 100%; font-weight: 600; padding: 7px 10px; border-left: 3px solid; }
+#status.err { color: var(--alarm); border-color: var(--alarm); background: color-mix(in srgb, var(--alarm) 10%, transparent); }
+#status.note { color: var(--amber-ink); border-color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 tr.focus td { background: var(--accent-soft); }
 #wnfts { font-size: 12px; color: var(--dim); }
 .hint .warn::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: 1px; }
@@ -424,7 +426,8 @@ function showLanding() {
   history.replaceState(null, "", location.pathname);
 }
 
-function say(text, err = false) { $("status").textContent = text; $("status").classList.toggle("err", err); }
+// kind: true = input error (red), "note" = nothing found for this wallet (amber)
+function say(text, kind = "") { $("status").textContent = text; $("status").className = kind === true ? "err" : kind || ""; }
 
 // ownerOf(id) on the identity.md contract; null if it reverts or the RPC is unreachable
 async function ownerOf(id) {
@@ -513,13 +516,19 @@ async function lookup(input) {
     if (current !== wallet || n === null) return;
     const idle = n - seats.length;
     $("wnfts").textContent = `holds ${n} identity.md NFT${n === 1 ? "" : "s"}` + (ids.length ? ` · running the daemon: ${ids.join(", ")}` : "") + (idle > 0 ? ` · ${idle} not running` : "");
+    if (empty) say(n === 0
+      ? "Nothing here: this wallet holds no identity.md NFT, so it cannot run the daemon or receive payouts."
+      : `${idleNft ? `#${idleNft}: ` : ""}Nothing here yet: this wallet holds ${n} identity.md NFT${n === 1 ? "" : "s"}, but none has run the daemon, so there are no payouts or allocations.`, "note");
   });
 
   $("landing").hidden = true; $("wallet").hidden = false;
+  const empty = !seats.length && !got.length && !rows.length;
   const others = seats.filter((x) => x.tokenId !== focusNft).map((x) => "#" + x.tokenId);
   const mine = focusNft && split[focusNft];
   say((idleNft ? `#${idleNft} has not run the daemon yet; showing its owner · `
     : focusNft && others.length ? `#${focusNft} shares this wallet with ${others.join(", ")}; totals are for the whole wallet${mine ? `, #${focusNft} alone got ${imd(mine.sure)}${mine.unsure ? "+" : ""} IMD` : ""} · ` : "") + `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`);
+  if (empty) say(idleNft ? `#${idleNft} has not run the daemon yet, and its owner has no payouts or allocations.`
+    : "Nothing here: this wallet has no NFT running the daemon, no payouts and no allocations.", "note");
   $("live").textContent = `snapshot ${ago(snap.generatedAt)}`;
   if (rows.some((r) => r.a.claimed !== true)) recheck();
 }
