@@ -6,6 +6,11 @@ Type a wallet address, or an identity.md NFT number, and see:
 
 - every swarm launch that allocated tokens to that wallet, with the amount, share and
   whether it has been claimed;
+- where each share came from, for launches that publish it (policy v5 and later): the part
+  earned by work on that launch, and the part from the pool every launch splits equally
+  among the wallets with work accepted in the hours before it;
+- launches that never deployed (parked or abandoned) are marked as such: their allocations
+  are void and are not counted as payments;
 - the claim page and the distributor contract for each one, so you can check the
   address before signing anything;
 - the wallet's seats on the network: accepted and rejected tasks, hours, rank;

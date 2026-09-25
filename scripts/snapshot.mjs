@@ -103,8 +103,39 @@ async function main() {
     const distributor = (d.artifacts ?? []).find((a) => a.role === "distributor");
     const manifestToken = d.attestation?.manifest?.token ?? {};
     const allocations = (d.allocations ?? []).map((a) => ({ wallet: a.wallet.toLowerCase(), amount: a.amount, bps: a.shareBps, agentId: a.agentId ?? null }));
+    // Policy v5 launches carry a reward snapshot: every accepted work item in the window
+    // before the launch, and per wallet how much came from work on this launch versus the
+    // pool shared with everyone recently active. Aggregate it per allocation; the raw list
+    // (tens of thousands of items) stays out of the snapshot.
+    const rs = d.rewardSnapshot;
+    let reward = null;
+    if (rs && Array.isArray(rs.work)) {
+      const launchJobs = new Set((d.jobs ?? []).map((j) => j.id));
+      // Per wallet: everything accepted in the window, by kind, plus the part we can tie to
+      // this launch's own jobs (the API lists only the final stage job, so that part is a floor).
+      const per = new Map();
+      for (const w of rs.work) {
+        const k = w.wallet.toLowerCase();
+        const e = per.get(k) ?? { total: {}, launch: {} };
+        e.total[w.kind] = (e.total[w.kind] ?? 0) + 1;
+        if (launchJobs.has(w.jobId)) e.launch[w.kind] = (e.launch[w.kind] ?? 0) + 1;
+        per.set(k, e);
+      }
+      const split = new Map((rs.breakdown ?? []).map((b) => [b.wallet.toLowerCase(), b]));
+      for (const a of allocations) {
+        const b = split.get(a.wallet);
+        if (b) { a.launchAmount = b.launchAmount; a.recentAmount = b.recentAmount; }
+        const e = per.get(a.wallet);
+        if (e) a.work = e;
+      }
+      const totals = {};
+      for (const w of rs.work) totals[w.kind] = (totals[w.kind] ?? 0) + 1;
+      reward = { from: rs.from, to: rs.to, recentBps: rs.recentContributorBps ?? null, version: rs.version ?? null, workTotals: totals, recentWallets: per.size };
+    }
+    const failure = d.deployFailure ? String(d.deployFailure).split("\n")[0].slice(0, 140) : null;
     launches.push({
       number: d.launchNumber, id: d.id, kind: d.kind, status: d.status, chainId: d.chainId,
+      policy: d.policyVersion ?? null, parkedReason: d.parkedReason ?? null, deployFailure: failure, reward,
       createdAt: d.createdAt, repo: d.sourceRepoUrl ?? null,
       site: distributor ? siteByDistributor.get(distributor.address.toLowerCase()) ?? null : null,
       token: token ? { address: token.address, name: manifestToken.name ?? token.name, symbol: manifestToken.symbol ?? null, decimals: manifestToken.decimals ?? 18 } : null,
@@ -147,7 +178,7 @@ async function main() {
 
   launches.sort((a, b) => b.number - a.number);
   const snapshot = {
-    v: 1,
+    v: 2,
     generatedAt: new Date().toISOString(),
     explorers: EXPLORER,
     network: health ? { online: health.connectedDaemons, enrolled: health.activeEnrollments, acceptedLastDay: health.acceptedLastDay, build: health.version } : null,
@@ -159,7 +190,8 @@ async function main() {
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(snapshot));
   const withAlloc = launches.filter((l) => l.allocations.length).length;
-  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations), ${seats.length} seats`);
+  const withReward = launches.filter((l) => l.reward).length;
+  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

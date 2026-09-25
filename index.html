@@ -100,6 +100,14 @@ tr:hover td { background: var(--hover); }
 .meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
 .addrbtn { font: 12px var(--mono); color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .empty { padding: 22px 0; color: var(--dim); }
+.tag.warn { border-color: var(--amber); color: var(--amber); }
+.tag.bad { border-color: var(--alarm); color: var(--alarm); }
+tr.void td { color: var(--dim); }
+tr.void td .no { text-decoration: line-through; text-decoration-color: var(--faint); }
+.lamp.void::before { background: var(--alarm); }
+.why { display: block; font-size: 12px; color: var(--dim); margin-top: 3px; line-height: 1.4; }
+.why b { font-weight: 500; color: var(--ink); }
+@media (max-width: 700px) { .why { text-align: right; } }
 .walletlink { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
 /* small screens: rows become stacked blocks */
@@ -154,8 +162,8 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
     </section>
 
     <section>
-      <div class="sechead"><h2>Allocations</h2><span class="aside"><span id="live"></span> <button class="linkbtn" id="recheck" type="button">re-check on chain</button></span></div>
-      <table class="stack"><thead><tr><th>Launch</th><th>Token</th><th class="r">Amount</th><th class="r">Share</th><th>Status</th><th>Claim</th><th>Distributor</th></tr></thead><tbody id="alloc"></tbody></table>
+      <div class="sechead"><h2>Allocations</h2><span class="aside"><span id="policy"></span> <span id="live"></span> <button class="linkbtn" id="recheck" type="button">re-check on chain</button></span></div>
+      <table class="stack"><thead><tr><th>Launch</th><th>Token</th><th class="r">Amount</th><th class="r">Share</th><th>Earned by</th><th>Status</th><th>Claim</th><th>Distributor</th></tr></thead><tbody id="alloc"></tbody></table>
     </section>
 
     <section>
@@ -216,6 +224,32 @@ const lamp = (c) => c === true ? '<span class="lamp ok">claimed</span>' : c === 
 const bar = (f) => `<span class="meter"><i style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(1)}%"></i></span>${(f * 100).toFixed(0)}%`;
 const no = (n) => `<span class="no">No.&nbsp;${String(n).padStart(4, "0")}</span>`;
 const netTag = (c) => (c === 1 ? "" : '<span class="tag">test</span>');
+// A launch that never got a distributor pays nobody: parked (deploy or checks failed) or abandoned.
+const isVoid = (l) => !l.distributor && l.status !== "live";
+const statusTag = (l) => l.status === "parked" ? '<span class="tag warn" title="' + esc(l.deployFailure ?? l.parkedReason ?? "parked") + '">parked</span>'
+  : l.status === "abandoned" ? '<span class="tag bad" title="' + esc(l.parkedReason ?? "abandoned") + '">abandoned</span>' : "";
+const lampVoid = '<span class="lamp void">void</span>';
+const kinds = (o) => Object.entries(o ?? {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`).join(", ");
+// Where an allocation came from, for policy v5 launches that publish the breakdown.
+// Short in the cell, the full sentence on hover.
+function why(l, a) {
+  if (!l.reward) return `<span class="why" title="Launches before policy v5 published only the final split.">policy v${esc(l.policy ?? "?")} · no breakdown</span>`;
+  const dec = l.token?.decimals ?? 18;
+  const own = a.launchAmount && a.launchAmount !== "0", pool = a.recentAmount && a.recentAmount !== "0";
+  const n = l.reward.recentWallets, hrs = Math.round((new Date(l.reward.to) - new Date(l.reward.from)) / 36e5), share = (l.reward.recentBps / 100).toFixed(0);
+  const done = kinds(a.work?.launch), mine = kinds(a.work?.total);
+  const cell = [], full = [];
+  if (own) {
+    cell.push(`<b>${compact(a.launchAmount, dec)}</b> launch work${done ? ` (${esc(done)})` : ""}`);
+    full.push(`${units(a.launchAmount, dec)} for work on this launch${done ? ` (${done})` : ""}`);
+  }
+  if (pool) {
+    cell.push(`<b>${compact(a.recentAmount, dec)}</b> pool, 1/${num(n)}`);
+    full.push(`${units(a.recentAmount, dec)} from the ${share}% pool that every launch splits equally among the wallets with work accepted in the ${hrs} h before it (${num(n)} wallets this time${mine ? `; yours: ${mine}` : ""})`);
+  }
+  if (!cell.length) return '<span class="why">no work recorded in the window</span>';
+  return `<span class="why" title="${esc(full.join(". "))}.">${cell.join(" · ")}</span>`;
+}
 function ago(iso) {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
@@ -251,17 +285,23 @@ function renderLanding() {
   const withAlloc = snap.launches.filter((l) => l.allocations.length);
   $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
     const f = l.funded && l.funded !== "0" ? Number(BigInt(l.claimedTotal ?? "0") * 10000n / BigInt(l.funded)) / 10000 : null;
-    return `<tr><td class="first" data-l="Launch">${no(l.number)}</td>
-      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}</td>
+    const claimed = f !== null ? bar(f) : isVoid(l) ? `<span class="dimtxt">${l.status === "parked" ? "deploy failed · nothing to claim" : "abandoned · nothing to claim"}</span>`
+      : !l.distributor ? '<span class="dimtxt">distributor not deployed yet</span>' : '<span class="dimtxt">not funded yet</span>';
+    return `<tr class="${isVoid(l) ? "void" : ""}"><td class="first" data-l="Launch">${no(l.number)}</td>
+      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}${statusTag(l)}</td>
       <td data-l="Date" class="dimtxt">${day(l.createdAt)}</td>
       <td data-l="Recipients" class="r">${l.allocations.length}</td>
-      <td data-l="Claimed">${f === null ? '<span class="dimtxt">—</span>' : bar(f)}</td>
+      <td data-l="Claimed">${claimed}</td>
       <td data-l="Claim">${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open ↗</a>` : '<span class="dimtxt">—</span>'}</td></tr>`;
   }).join("") || `<tr><td class="empty" colspan="6">No launches with allocations yet.</td></tr>`;
+  const voidCount = withAlloc.filter(isVoid).length;
+  $("launches").closest("section").querySelector(".aside").textContent =
+    voidCount ? `claimed share of the swarm allocation · ${voidCount} listed launch${voidCount === 1 ? "" : "es"} never deployed, so their allocations are void` : "claimed share of the swarm allocation";
   wrapCells($("launches"));
 
   const byWallet = new Map();
   for (const l of snap.launches) for (const a of l.allocations) {
+    if (isVoid(l)) continue;
     const w = byWallet.get(a.wallet) ?? { wallet: a.wallet, launches: 0, unclaimed: 0 };
     w.launches++; if (a.claimed === false) w.unclaimed++; byWallet.set(a.wallet, w);
   }
@@ -297,15 +337,17 @@ function rowsFor(wallet) {
 
 function tally(rows) {
   const un = rows.filter((r) => r.a.claimed === false).length;
-  return `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Launches">${rows.length} launch${rows.length === 1 ? "" : "es"}</td><td data-l=""></td><td data-l=""></td><td data-l="Unclaimed" class="tallyun">${un} unclaimed</td><td data-l=""></td><td data-l=""></td></tr>`;
+  const voids = rows.filter((r) => isVoid(r.l)).length;
+  return `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Launches">${rows.length - voids} launch${rows.length - voids === 1 ? "" : "es"}${voids ? ` <span class="dimtxt">+ ${voids} void</span>` : ""}</td><td data-l=""></td><td data-l=""></td><td data-l=""></td><td data-l="Unclaimed" class="tallyun">${un} unclaimed</td><td data-l=""></td><td data-l=""></td></tr>`;
 }
 
 function renderWalletStats(wallet, rows, seats) {
   const unclaimed = rows.filter((r) => r.a.claimed === false).length;
+  const voids = rows.filter((r) => isVoid(r.l)).length;
   $("wstats").innerHTML = [
     stat("Seats", seats.length),
     stat("Accepted tasks", num(seats.reduce((n, s) => n + s.accepted, 0))),
-    stat("Allocations", rows.length),
+    stat("Allocations", rows.length - voids, voids ? `+ ${voids} void` : ""),
     stat("Unclaimed", unclaimed),
   ].join("");
 }
@@ -331,15 +373,21 @@ function lookup(input) {
 
   $("alloc").innerHTML = rows.length ? rows.map(({ l, a }) => {
     const sweep = l.sweepAfter ? ` title="Unclaimed tokens can be swept to the treasury after ${new Date(l.sweepAfter * 1000).toDateString()}"` : "";
-    return `<tr data-launch="${l.number}">
+    const voidRow = isVoid(l);
+    const status = voidRow ? `<span title="${esc(l.deployFailure ?? l.parkedReason ?? "never deployed")}">${lampVoid}</span>`
+      : !l.distributor ? '<span class="lamp">not deployed yet</span>' : lamp(a.claimed);
+    return `<tr data-launch="${l.number}" class="${voidRow ? "void" : ""}">
       <td class="first" data-l="Launch">${no(l.number)}</td>
-      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}</td>
+      <td data-l="Token">${esc(l.token?.name ?? "—")}<span class="sym">${esc(l.token?.symbol ?? "")}</span>${netTag(l.chainId)}${statusTag(l)}</td>
       <td data-l="Amount" class="r">${units(a.amount, l.token?.decimals ?? 18)}</td>
       <td data-l="Share" class="r">${pct(a.bps)}</td>
-      <td data-l="Status" class="st"${sweep}>${lamp(a.claimed)}</td>
+      <td data-l="Earned by">${why(l, a)}</td>
+      <td data-l="Status" class="st"${sweep}>${status}</td>
       <td data-l="Claim">${l.site ? `<a href="${esc(l.site)}" target="_blank" rel="noopener">open ↗</a>` : '<span class="dimtxt">—</span>'}</td>
       <td data-l="Distributor">${l.distributor ? `<button class="addrbtn" data-copy="${esc(l.distributor)}" title="copy full address">${short(l.distributor)}</button> <a class="dimtxt" href="${explorer(l.chainId)}/address/${esc(l.distributor)}" target="_blank" rel="noopener" aria-label="open in explorer">↗</a>` : '<span class="dimtxt">—</span>'}</td></tr>`;
-  }).join("") + tally(rows) : `<tr><td class="empty" colspan="7">No launch allocations for this wallet yet. Allocations go to seats that did good work around a launch.</td></tr>`;
+  }).join("") + tally(rows) : `<tr><td class="empty" colspan="8">No launch allocations for this wallet yet. Allocations go to seats that did good work around a launch.</td></tr>`;
+  const withReward = rows.filter((r) => r.l.reward).length;
+  $("policy").textContent = withReward ? `newer launches publish where each share came from ·` : "";
 
   $("seats").innerHTML = seats.length ? seats.map((s) => {
     const f = s.attempts ? s.accepted / s.attempts : 0;
@@ -402,6 +450,10 @@ fetch(DATA_URL, { cache: "no-cache" })
     const start = decodeURIComponent(location.hash.slice(1));
     if (start) lookup(start);
     else { const last = load("swarm-ledger-wallet"); if (last) $("q").value = last; }
+    addEventListener("hashchange", () => {
+      const h = decodeURIComponent(location.hash.slice(1));
+      if (h && h !== current) lookup(h); else if (!h && current) showLanding();
+    });
   })
   .catch((e) => { $("status").textContent = "Could not load data: " + e.message; });
 </script>
