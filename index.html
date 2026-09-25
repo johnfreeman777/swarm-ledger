@@ -60,6 +60,7 @@ form.q button { height: 48px; padding: 0 22px; border: 0; border-left: var(--rul
 form.q button:hover { opacity: .85; }
 .hint { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; font-size: 12px; color: var(--dim); }
 #status { min-height: 20px; }
+#status.err { color: var(--alarm); font-weight: 600; }
 .hint .warn::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: 1px; }
 
 section { margin-top: 38px; }
@@ -213,6 +214,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 const LOCAL = /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
 const DATA_URL = LOCAL ? "data/snapshot.json" : "https://johnfreeman777.github.io/swarm-ledger/data/snapshot.json";
 const RPC = { 1: "https://ethereum-rpc.publicnode.com", 11155111: "https://ethereum-sepolia-rpc.publicnode.com" };
+const NFT_CONTRACT = "0x0000ec93127baa929e58e97dd0095a2bfb38ec1d"; // identity.md, token ids 1-2000
 const CLAIMED_SEL = "0x120aa877"; // claimed(uint256 round, address account)
 const $ = (id) => document.getElementById(id);
 let snap = null, current = null;
@@ -396,13 +398,39 @@ function renderWalletStats(wallet, rows, seats) {
 }
 
 function showLanding() {
-  current = null; $("wallet").hidden = true; $("landing").hidden = false; $("status").textContent = "";
+  lookupSeq++; current = null; $("wallet").hidden = true; $("landing").hidden = false; say("");
   history.replaceState(null, "", location.pathname);
 }
 
-function lookup(input) {
-  const wallet = resolveWallet(input);
-  if (!wallet) { $("status").textContent = "Enter a 0x wallet, or the number of an NFT that has worked on the network."; return; }
+function say(text, err = false) { $("status").textContent = text; $("status").classList.toggle("err", err); }
+
+// ownerOf(id) on the identity.md contract; null if it reverts or the RPC is unreachable
+async function ownerOf(id) {
+  const data = "0x6352211e" + BigInt(id).toString(16).padStart(64, "0");
+  try {
+    const r = await (await fetch(RPC[1], { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: NFT_CONTRACT, data }, "latest"] }) })).json();
+    return typeof r.result === "string" && r.result.length >= 66 ? "0x" + r.result.slice(-40).toLowerCase() : null;
+  } catch { return null; }
+}
+
+let lookupSeq = 0;
+async function lookup(input) {
+  const seq = ++lookupSeq;
+  const text = input.trim();
+  let wallet = resolveWallet(text), idleNft = null;
+  const m = text.match(/^#?(\d{1,4})$/);
+  if (!wallet && m) {
+    // an NFT that never ran the daemon is not in the snapshot: find its owner on chain
+    const id = Number(m[1]);
+    if (id < 1 || id > 2000) { say("identity.md NFTs are numbered 1 to 2000.", true); return; }
+    say(`#${id} has not worked on the network yet. Looking up its owner on chain…`);
+    wallet = await ownerOf(id);
+    if (seq !== lookupSeq) return;
+    if (!wallet) { say(`Could not read the owner of #${id} on chain. Try again, or paste the wallet address.`, true); return; }
+    idleNft = id;
+  }
+  if (!wallet) { say("Enter a 0x wallet address or an NFT number from 1 to 2000.", true); return; }
   current = wallet;
   history.replaceState(null, "", "#" + wallet);
   store("swarm-ledger-wallet", wallet);
@@ -448,11 +476,11 @@ function lookup(input) {
       <td data-l="Acceptance">${bar(f)}</td><td data-l="Hours" class="r">${s.hours}</td>
       <td data-l="Rank" class="r">${s.rank}<span class="dimtxt"> / ${snap.seatCount}</span></td>
       <td data-l="Agent"><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer ↗</a></td></tr>`;
-  }).join("") : `<tr><td class="empty" colspan="7">No seat from this wallet has worked on the network yet.</td></tr>`;
+  }).join("") : `<tr><td class="empty" colspan="7">${idleNft ? `NFT #${idleNft} belongs to this wallet but has not run the daemon yet. Seats appear here after their first task.` : "No seat from this wallet has worked on the network yet."}</td></tr>`;
   wrapCells($("wpay")); wrapCells($("alloc")); wrapCells($("seats"));
 
   $("landing").hidden = true; $("wallet").hidden = false;
-  $("status").textContent = `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`;
+  say((idleNft ? `#${idleNft} has not run the daemon yet; showing its owner · ` : "") + `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`);
   $("live").textContent = `snapshot ${ago(snap.generatedAt)}`;
   if (rows.some((r) => r.a.claimed !== true)) recheck();
 }
