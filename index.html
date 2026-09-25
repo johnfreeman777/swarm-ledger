@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Swarm Ledger</title>
-<meta name="description" content="Swarm Ledger: who the IMD swarm paid. Launch allocations, claim status and seat stats for any IMD wallet. Read-only; never asks you to connect a wallet.">
+<meta name="description" content="Swarm Ledger: who the IMD swarm paid. IMD payouts to node operators, launch allocations, claim status and seat stats for any IMD wallet. Read-only; never asks you to connect a wallet.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -150,18 +150,23 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 
 <main class="wrap">
   <h1>Who the swarm <em>paid</em>.</h1>
-  <p class="lead">Every IMD swarm launch shares part of its supply with the agents that built it. Look up a wallet or an NFT to see its allocations, whether they are claimed, and how its seats are doing.</p>
+  <p class="lead">Seats that run the daemon get IMD payouts, and every swarm launch shares part of its supply with the agents that built it. Look up a wallet or an NFT to see what it was paid, its allocations and whether they are claimed, and how its seats are doing.</p>
 
   <form class="q" id="f">
     <input id="q" autocomplete="off" spellcheck="false" placeholder="0x… wallet or #NFT number" aria-label="Wallet address or NFT number">
     <button type="submit">Look up</button>
   </form>
-  <div class="hint"><span id="status"></span><span class="warn">Sepolia testnet: tokens have no value yet</span><span>No wallet connect. Read-only.</span></div>
+  <div class="hint"><span id="status"></span><span>Payouts: IMD on Ethereum mainnet</span><span class="warn">Launch allocations: Sepolia testnet, no value yet</span><span>No wallet connect. Read-only.</span></div>
 
   <div id="wallet" hidden>
     <section>
       <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a></div>
       <div class="stats" id="wstats"></div>
+    </section>
+
+    <section>
+      <div class="sechead"><h2>Payouts</h2><span class="aside">IMD sent to seats that ran the daemon</span></div>
+      <table class="stack"><thead><tr><th>Date</th><th class="r">Seats paid</th><th class="r">Per seat</th><th class="r">Received</th><th>Transaction</th></tr></thead><tbody id="wpay"></tbody></table>
     </section>
 
     <section>
@@ -179,6 +184,11 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
     <section>
       <div class="sechead"><h2>Network</h2><span class="aside" id="snapage"></span></div>
       <div class="stats five" id="nstats"></div>
+    </section>
+
+    <section id="payoutsec">
+      <div class="sechead"><h2>Operator payouts</h2><span class="aside" id="payaside"></span></div>
+      <table class="stack"><thead><tr><th>Date</th><th class="r">Seats</th><th class="r">Wallets</th><th class="r">Per seat</th><th class="r">Total</th><th>Transaction</th></tr></thead><tbody id="payouts"></tbody></table>
     </section>
 
     <section>
@@ -220,6 +230,12 @@ function compact(raw, decimals = 18) {
     return v >= 1e9 ? (v / 1e9).toFixed(2) + "B" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(v);
   } catch { return "?"; }
 }
+// fractional IMD with up to 2 decimals, e.g. "7.69"
+function imd(raw) {
+  try { const c = (BigInt(raw) * 100n + 5n * 10n ** 17n) / 10n ** 18n; return (Number(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); } catch { return "?"; }
+}
+const seatsIn = (raw, per) => (per && per !== "0" ? Number((BigInt(raw) + BigInt(per) / 2n) / BigInt(per)) : 0);
+const txLink = (h) => `<a href="https://etherscan.io/tx/${esc(h)}" target="_blank" rel="noopener">${short(h)} ↗</a>`;
 const pct = (bps) => (Number(bps) / 100).toFixed(2) + "%";
 const explorer = (c) => snap?.explorers?.[c] ?? "https://etherscan.io";
 const stat = (k, v, sub = "") => `<div class="stat"><div class="label">${esc(k)}</div><div class="v">${esc(v)}${sub ? ` <small>${esc(sub)}</small>` : ""}</div></div>`;
@@ -292,7 +308,16 @@ function renderLanding() {
   if (cells[2]) cells[2].title = `${num(live)} launches deployed a token and a distributor; ${num(dead)} were parked or abandoned before deploying, so their allocations are void.`;
   if (pay && cells[3]) cells[3].title = `Holders paying the network to open work: ${pay.actions.join(", ")}. ${num(pay.failed ?? 0)} failed, ${num(pay.expired ?? 0)} expired.`;
   $("snapage").textContent = `snapshot ${ago(snap.generatedAt)}`;
-  $("foot").textContent = `Data: api.imd.fun, refreshed about every 30 min · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+  $("foot").textContent = `Data: api.imd.fun and Blockscout, refreshed about every 30 min · payouts = IMD Disperse rounds from the developer's wallet · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+
+  const pays = snap.payouts ?? [];
+  $("payoutsec").hidden = snap.payouts == null;
+  $("payaside").innerHTML = `sent by the developer's wallet <a href="https://etherscan.io/address/${esc(snap.payoutSender ?? "")}" target="_blank" rel="noopener">surfsurf.eth ↗</a>`;
+  $("payouts").innerHTML = pays.map((p) => `<tr><td class="first" data-l="Date">${day(p.time)}</td>
+      <td data-l="Seats" class="r">${num(p.seatCount)}</td><td data-l="Wallets" class="r">${num(Object.keys(p.paid).length)}</td>
+      <td data-l="Per seat" class="r">${imd(p.perSeat)} IMD</td><td data-l="Total" class="r">${imd(p.total)} IMD</td>
+      <td data-l="Transaction">${txLink(p.tx)}</td></tr>`).join("") || `<tr><td class="empty" colspan="6">No payouts yet.</td></tr>`;
+  wrapCells($("payouts"));
 
   const withAlloc = snap.launches.filter((l) => l.allocations.length);
   $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
@@ -354,14 +379,19 @@ function tally(rows) {
   return `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Launches">${rows.length - voids} launch${rows.length - voids === 1 ? "" : "es"}${voids ? ` <span class="dimtxt">+ ${voids} void</span>` : ""}</td><td data-l=""></td><td data-l=""></td><td data-l=""></td><td data-l="Unclaimed" class="tallyun">${un} unclaimed</td><td data-l=""></td><td data-l=""></td></tr>`;
 }
 
+function paidTo(wallet) {
+  return (snap.payouts ?? []).filter((p) => p.paid[wallet]).map((p) => ({ p, amount: p.paid[wallet] }));
+}
+
 function renderWalletStats(wallet, rows, seats) {
   const unclaimed = rows.filter((r) => r.a.claimed === false).length;
   const voids = rows.filter((r) => isVoid(r.l)).length;
+  const received = paidTo(wallet).reduce((n, x) => n + BigInt(x.amount), 0n);
   $("wstats").innerHTML = [
     stat("Seats", seats.length),
     stat("Accepted tasks", num(seats.reduce((n, s) => n + s.accepted, 0))),
-    stat("Allocations", rows.length - voids, voids ? `+ ${voids} void` : ""),
-    stat("Unclaimed", unclaimed),
+    stat("IMD paid out", imd(received)),
+    stat("Unclaimed", unclaimed, `of ${rows.length - voids}${voids ? ` + ${voids} void` : ""}`),
   ].join("");
 }
 
@@ -383,6 +413,15 @@ function lookup(input) {
   $("waddr").innerHTML = esc(wallet) + labelTag(wallet);
   $("wscan").href = `https://etherscan.io/address/${wallet}`;
   renderWalletStats(wallet, rows, seats);
+
+  const got = paidTo(wallet);
+  const gotTotal = got.reduce((n, x) => n + BigInt(x.amount), 0n);
+  $("wpay").innerHTML = got.length ? got.map(({ p, amount }) => `<tr><td class="first" data-l="Date">${day(p.time)}</td>
+      <td data-l="Seats paid" class="r">${seatsIn(amount, p.perSeat)}</td><td data-l="Per seat" class="r">${imd(p.perSeat)}</td>
+      <td data-l="Received" class="r">${imd(amount)} IMD</td><td data-l="Transaction">${txLink(p.tx)}</td></tr>`).join("")
+      + `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Payouts">${got.length} payout${got.length === 1 ? "" : "s"}</td><td data-l=""></td><td data-l="Received" class="r">${imd(gotTotal)} IMD</td><td data-l=""></td></tr>`
+    : snap.payouts == null ? `<tr><td class="empty" colspan="5">Payout data is unavailable in this snapshot.</td></tr>`
+    : `<tr><td class="empty" colspan="5">No payouts to this wallet yet. Payouts go to seats that ran the daemon during a round.</td></tr>`;
 
   $("alloc").innerHTML = rows.length ? rows.map(({ l, a }) => {
     const sweep = l.sweepAfter ? ` title="Unclaimed tokens can be swept to the treasury after ${new Date(l.sweepAfter * 1000).toDateString()}"` : "";
@@ -410,10 +449,10 @@ function lookup(input) {
       <td data-l="Rank" class="r">${s.rank}<span class="dimtxt"> / ${snap.seatCount}</span></td>
       <td data-l="Agent"><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer ↗</a></td></tr>`;
   }).join("") : `<tr><td class="empty" colspan="7">No seat from this wallet has worked on the network yet.</td></tr>`;
-  wrapCells($("alloc")); wrapCells($("seats"));
+  wrapCells($("wpay")); wrapCells($("alloc")); wrapCells($("seats"));
 
   $("landing").hidden = true; $("wallet").hidden = false;
-  $("status").textContent = `${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`;
+  $("status").textContent = `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`;
   $("live").textContent = `snapshot ${ago(snap.generatedAt)}`;
   if (rows.some((r) => r.a.claimed !== true)) recheck();
 }

@@ -4,6 +4,8 @@ Who the IMD swarm paid. Live at **https://johnfreeman777.github.io/swarm-ledger/
 
 Type a wallet address, or an identity.md NFT number, and see:
 
+- every IMD payout the developer sent to that wallet's seats for running the daemon,
+  with the amount per seat and the transaction;
 - every swarm launch that allocated tokens to that wallet, with the amount, share and
   whether it has been claimed;
 - where each share came from, for launches that publish it (policy v5 and later): the part
@@ -29,7 +31,10 @@ read it directly. Instead:
    runs several times a day. It reads
    `/launches`, `/sites` and `/contributors` from the public API. It then asks each
    launch's MerkleDistributor `claimed(0, wallet)` for every allocation, plus the
-   round data, and writes one JSON file.
+   round data. Payouts come from Blockscout: every `disperseToken` call of IMD that
+   the developer's wallet (surfsurf.eth, which also owns the POOL4 hooks) sent
+   through the Disperse contract. The script sums each wallet's share and counts
+   seats as amount ÷ per-seat amount. It writes everything to one JSON file.
 2. **`index.html`** loads that file. For the wallet you look up, it re-checks every
    claim live against public RPC (publicnode), so a claim you just made shows up
    right away.

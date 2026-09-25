@@ -20,6 +20,13 @@ const RPC = {
 const EXPLORER = { 1: "https://etherscan.io", 11155111: "https://sepolia.etherscan.io" };
 // IMD reward distributor on mainnet (POOL4 docs §11): holds the NFT-node reserve.
 const REWARD_DISTRIBUTOR = "0x9046739E1535B40EfBe6AB3f45d0024b690eCA30";
+// Operator payouts: the developer's wallet (surfsurf.eth, which also owns the POOL4
+// hooks) sends IMD to every seat that ran the daemon, in one Disperse call per round.
+const IMD = "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7";
+const PAYOUT_SENDER = "0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7";
+const DISPERSE = "0xd15fe25ed0dba12fe05e7029c88b10c25e8880e3";
+const PAYOUTS_SINCE = "2026-09-20T00:00:00Z"; // the swarm went live on 21 Sep
+const BLOCKSCOUT = "https://eth.blockscout.com/api/v2";
 
 const SEL = {
   claimed: "0x120aa877", // claimed(uint256,address)
@@ -65,6 +72,58 @@ async function ethCalls(chainId, calls) {
     if (!done) console.warn(`rpc ${chainId}: a batch failed on every endpoint`);
   }
   return out;
+}
+
+async function blockscout(path, attempt = 0) {
+  try {
+    const r = await fetch(BLOCKSCOUT + path, { signal: AbortSignal.timeout(30_000), headers: { "user-agent": "swarm-ledger" } });
+    if (!r.ok) throw new Error(`blockscout ${path}: HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    if (attempt < 2) { await new Promise((s) => setTimeout(s, 2000 * (attempt + 1))); return blockscout(path, attempt + 1); }
+    throw e;
+  }
+}
+
+// Every IMD Disperse round from the payout wallet since PAYOUTS_SINCE, newest first.
+// A recipient appears once per seat in some rounds and once per wallet (summed) in
+// others, so amounts are summed per wallet and seats = amount / per-seat amount.
+async function readPayouts() {
+  const found = [];
+  let query = "?filter=from";
+  for (let page = 0; page < 20; page++) {
+    const res = await blockscout(`/addresses/${PAYOUT_SENDER}/transactions${query}`);
+    const items = res.items ?? [];
+    for (const t of items) {
+      if (t.to?.hash?.toLowerCase() === DISPERSE && t.method === "disperseToken" && t.status === "ok") found.push(t.hash);
+    }
+    const last = items.at(-1);
+    if (!res.next_page_params || !last || last.timestamp < PAYOUTS_SINCE) break;
+    query = "?" + new URLSearchParams({ filter: "from", ...res.next_page_params }).toString();
+  }
+  const payouts = [];
+  for (const hash of found) {
+    const t = await blockscout(`/transactions/${hash}`);
+    if (t.timestamp < PAYOUTS_SINCE) continue;
+    const p = Object.fromEntries((t.decoded_input?.parameters ?? []).map((x) => [x.name, x.value]));
+    if (String(p.token).toLowerCase() !== IMD || !Array.isArray(p.recipients)) continue;
+    const byWallet = new Map();
+    let total = 0n, perSeat = null;
+    p.recipients.forEach((w, i) => {
+      const v = BigInt(p.values[i]);
+      const k = w.toLowerCase();
+      byWallet.set(k, (byWallet.get(k) ?? 0n) + v);
+      total += v;
+      if (v > 0n && (perSeat === null || v < perSeat)) perSeat = v;
+    });
+    const seats = (v) => (perSeat ? Number((v + perSeat / 2n) / perSeat) : 0);
+    payouts.push({
+      tx: t.hash, time: t.timestamp, block: t.block_number, total: total.toString(), perSeat: perSeat?.toString() ?? null,
+      seatCount: [...byWallet.values()].reduce((n, v) => n + seats(v), 0),
+      paid: Object.fromEntries([...byWallet].map(([w, v]) => [w, v.toString()])),
+    });
+  }
+  return payouts.sort((a, b) => b.block - a.block);
 }
 
 async function mapLimit(items, limit, fn) {
@@ -183,6 +242,9 @@ async function main() {
   const seats = [...byToken.values()].map(({ ms, ...e }) => ({ ...e, hours: Math.round(ms / 36e5 * 10) / 10 })).sort((a, b) => b.accepted - a.accepted);
   seats.forEach((s, i) => { s.rank = i + 1; });
 
+  // Payouts are optional: if Blockscout is down, publish the rest without them.
+  const payouts = await readPayouts().catch((e) => { console.warn("payouts skipped:", e.message); return null; });
+
   launches.sort((a, b) => b.number - a.number);
   const snapshot = {
     v: 2,
@@ -201,12 +263,14 @@ async function main() {
     seatCount: seats.length,
     seats,
     launches,
+    payouts,
+    payoutSender: PAYOUT_SENDER,
   };
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(snapshot));
   const withAlloc = launches.filter((l) => l.allocations.length).length;
   const withReward = launches.filter((l) => l.reward).length;
-  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats`);
+  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats, ${payouts ? payouts.length + " payouts" : "no payouts"}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
