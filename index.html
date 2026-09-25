@@ -61,6 +61,8 @@ form.q button:hover { opacity: .85; }
 .hint { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; font-size: 12px; color: var(--dim); }
 #status { min-height: 20px; }
 #status.err { color: var(--alarm); font-weight: 600; }
+tr.focus td { background: var(--accent-soft); }
+#wnfts { font-size: 12px; color: var(--dim); }
 .hint .warn::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: 1px; }
 
 section { margin-top: 38px; }
@@ -161,13 +163,13 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 
   <div id="wallet" hidden>
     <section>
-      <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a></div>
+      <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a><span id="wnfts"></span></div>
       <div class="stats" id="wstats"></div>
     </section>
 
     <section>
-      <div class="sechead"><h2>Payouts</h2><span class="aside">IMD sent to seats that ran the daemon</span></div>
-      <table class="stack"><thead><tr><th>Date</th><th class="r">Seats paid</th><th class="r">Per seat</th><th class="r">Received</th><th>Transaction</th></tr></thead><tbody id="wpay"></tbody></table>
+      <div class="sechead"><h2>Payouts</h2><span class="aside" id="wpayaside">IMD sent to seats that ran the daemon</span></div>
+      <table class="stack"><thead><tr><th>Date</th><th class="r">NFTs paid</th><th class="r">Per NFT</th><th class="r">Received</th><th>Transaction</th></tr></thead><tbody id="wpay"></tbody></table>
     </section>
 
     <section>
@@ -177,7 +179,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 
     <section>
       <div class="sechead"><h2>Seats</h2><span class="aside">accepted = verifier-accepted submissions</span></div>
-      <table class="stack"><thead><tr><th>NFT</th><th class="r">Accepted</th><th class="r">Attempts</th><th>Acceptance</th><th class="r">Hours</th><th class="r">Rank</th><th></th></tr></thead><tbody id="seats"></tbody></table>
+      <table class="stack"><thead><tr><th>NFT</th><th class="r">Paid out</th><th class="r">Accepted</th><th class="r">Attempts</th><th>Acceptance</th><th class="r">Hours</th><th class="r">Rank</th><th></th></tr></thead><tbody id="seats"></tbody></table>
     </section>
   </div>
 
@@ -385,6 +387,26 @@ function paidTo(wallet) {
   return (snap.payouts ?? []).filter((p) => p.paid[wallet]).map((p) => ({ p, amount: p.paid[wallet] }));
 }
 
+// Payouts go to the wallet, not to an NFT. When a round paid exactly as many NFTs as
+// the wallet runs, each got the per-NFT amount; otherwise which ones were paid is unknown.
+function perNft(wallet, seats) {
+  const out = Object.fromEntries(seats.map((s) => [s.tokenId, { sure: 0n, unsure: 0 }]));
+  for (const { p, amount } of paidTo(wallet)) {
+    const n = seatsIn(amount, p.perSeat);
+    for (const s of seats) n === seats.length ? (out[s.tokenId].sure += BigInt(p.perSeat)) : out[s.tokenId].unsure++;
+  }
+  return out;
+}
+
+// balanceOf(wallet) on the identity.md contract, to count NFTs that never ran the daemon too
+async function nftBalance(wallet) {
+  try {
+    const r = await (await fetch(RPC[1], { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: NFT_CONTRACT, data: "0x70a08231" + wallet.slice(2).padStart(64, "0") }, "latest"] }) })).json();
+    return typeof r.result === "string" && r.result.length > 2 ? Number(BigInt(r.result)) : null;
+  } catch { return null; }
+}
+
 function renderWalletStats(wallet, rows, seats) {
   const unclaimed = rows.filter((r) => r.a.claimed === false).length;
   const voids = rows.filter((r) => isVoid(r.l)).length;
@@ -392,7 +414,7 @@ function renderWalletStats(wallet, rows, seats) {
   $("wstats").innerHTML = [
     stat("Seats", seats.length),
     stat("Accepted tasks", num(seats.reduce((n, s) => n + s.accepted, 0))),
-    stat("IMD paid out", imd(received)),
+    stat("IMD paid out", imd(received), seats.length > 1 ? `all ${seats.length} NFTs` : ""),
     stat("Unclaimed", unclaimed, `of ${rows.length - voids}${voids ? ` + ${voids} void` : ""}`),
   ].join("");
 }
@@ -431,6 +453,7 @@ async function lookup(input) {
     idleNft = id;
   }
   if (!wallet) { say("Enter a 0x wallet address or an NFT number from 1 to 2000.", true); return; }
+  const focusNft = m ? String(Number(m[1])) : null;
   current = wallet;
   history.replaceState(null, "", "#" + wallet);
   store("swarm-ledger-wallet", wallet);
@@ -445,8 +468,8 @@ async function lookup(input) {
   const got = paidTo(wallet);
   const gotTotal = got.reduce((n, x) => n + BigInt(x.amount), 0n);
   $("wpay").innerHTML = got.length ? got.map(({ p, amount }) => `<tr><td class="first" data-l="Date">${day(p.time)}</td>
-      <td data-l="Seats paid" class="r">${seatsIn(amount, p.perSeat)}</td><td data-l="Per seat" class="r">${imd(p.perSeat)}</td>
-      <td data-l="Received" class="r">${imd(amount)} IMD</td><td data-l="Transaction">${txLink(p.tx)}</td></tr>`).join("")
+      <td data-l="NFTs paid" class="r">${seatsIn(amount, p.perSeat)}</td><td data-l="Per NFT" class="r">${imd(p.perSeat)}</td>
+      <td data-l="Received" class="r">${imd(amount)} IMD${seatsIn(amount, p.perSeat) > 1 ? ` <span class="dimtxt">= ${seatsIn(amount, p.perSeat)} × ${imd(p.perSeat)}</span>` : ""}</td><td data-l="Transaction">${txLink(p.tx)}</td></tr>`).join("")
       + `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Payouts">${got.length} payout${got.length === 1 ? "" : "s"}</td><td data-l=""></td><td data-l="Received" class="r">${imd(gotTotal)} IMD</td><td data-l=""></td></tr>`
     : snap.payouts == null ? `<tr><td class="empty" colspan="5">Payout data is unavailable in this snapshot.</td></tr>`
     : `<tr><td class="empty" colspan="5">No payouts to this wallet yet. Payouts go to seats that ran the daemon during a round.</td></tr>`;
@@ -469,18 +492,34 @@ async function lookup(input) {
   const withReward = rows.filter((r) => r.l.reward).length;
   $("policy").textContent = withReward ? `newer launches publish where each share came from ·` : "";
 
+  const split = perNft(wallet, seats);
   $("seats").innerHTML = seats.length ? seats.map((s) => {
     const f = s.attempts ? s.accepted / s.attempts : 0;
-    return `<tr><td class="first" data-l="NFT">#${esc(s.tokenId)}</td>
+    const pay = split[s.tokenId];
+    const paid = pay.unsure ? `<span title="${pay.unsure} payout${pay.unsure === 1 ? "" : "s"} paid fewer NFTs than this wallet runs, so which NFT got ${pay.unsure === 1 ? "it" : "them"} is unknown">${pay.sure ? imd(pay.sure) + " + ?" : "?"}</span>` : `${imd(pay.sure)}`;
+    return `<tr class="${s.tokenId === focusNft ? "focus" : ""}"><td class="first" data-l="NFT">#${esc(s.tokenId)}</td>
+      <td data-l="Paid out" class="r">${paid} IMD</td>
       <td data-l="Accepted" class="r">${num(s.accepted)}</td><td data-l="Attempts" class="r">${num(s.attempts)}</td>
       <td data-l="Acceptance">${bar(f)}</td><td data-l="Hours" class="r">${s.hours}</td>
       <td data-l="Rank" class="r">${s.rank}<span class="dimtxt"> / ${snap.seatCount}</span></td>
       <td data-l="Agent"><a href="https://explorer.imd.fun/agents/${encodeURIComponent(s.tokenId)}" target="_blank" rel="noopener">explorer ↗</a></td></tr>`;
-  }).join("") : `<tr><td class="empty" colspan="7">${idleNft ? `NFT #${idleNft} belongs to this wallet but has not run the daemon yet. Seats appear here after their first task.` : "No seat from this wallet has worked on the network yet."}</td></tr>`;
+  }).join("") : `<tr><td class="empty" colspan="8">${idleNft ? `NFT #${idleNft} belongs to this wallet but has not run the daemon yet. Seats appear here after their first task.` : "No seat from this wallet has worked on the network yet."}</td></tr>`;
   wrapCells($("wpay")); wrapCells($("alloc")); wrapCells($("seats"));
 
+  const ids = seats.map((s) => s.tokenId).sort((a, b) => a - b).map((id) => "#" + id);
+  $("wnfts").textContent = ids.length ? `running the daemon: ${ids.join(", ")}` : "";
+  $("wpayaside").textContent = seats.length > 1 ? `paid to the wallet for all its NFTs · per-NFT amounts in Seats below` : "IMD sent to seats that ran the daemon";
+  nftBalance(wallet).then((n) => {
+    if (current !== wallet || n === null) return;
+    const idle = n - seats.length;
+    $("wnfts").textContent = `holds ${n} identity.md NFT${n === 1 ? "" : "s"}` + (ids.length ? ` · running the daemon: ${ids.join(", ")}` : "") + (idle > 0 ? ` · ${idle} not running` : "");
+  });
+
   $("landing").hidden = true; $("wallet").hidden = false;
-  say((idleNft ? `#${idleNft} has not run the daemon yet; showing its owner · ` : "") + `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`);
+  const others = seats.filter((x) => x.tokenId !== focusNft).map((x) => "#" + x.tokenId);
+  const mine = focusNft && split[focusNft];
+  say((idleNft ? `#${idleNft} has not run the daemon yet; showing its owner · `
+    : focusNft && others.length ? `#${focusNft} shares this wallet with ${others.join(", ")}; totals are for the whole wallet${mine ? `, #${focusNft} alone got ${imd(mine.sure)}${mine.unsure ? "+" : ""} IMD` : ""} · ` : "") + `${got.length} payout${got.length === 1 ? "" : "s"}, ${rows.length} allocation${rows.length === 1 ? "" : "s"}, ${seats.length} seat${seats.length === 1 ? "" : "s"}`);
   $("live").textContent = `snapshot ${ago(snap.generatedAt)}`;
   if (rows.some((r) => r.a.claimed !== true)) recheck();
 }
