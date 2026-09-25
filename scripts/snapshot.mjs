@@ -170,10 +170,17 @@ async function main() {
     { to: REWARD_DISTRIBUTOR, data: SEL.heldNft }, { to: REWARD_DISTRIBUTOR, data: SEL.nftEarned },
   ]);
 
-  const seats = (contrib.contributors ?? []).map((c) => ({
-    tokenId: String(c.tokenId), wallet: c.wallet.toLowerCase(), attempts: Number(c.attempts), accepted: Number(c.accepted),
-    rejected: Number(c.rejected ?? 0), pending: Number(c.pending ?? 0), hours: Math.round(Number(c.wallClockMs) / 36e5 * 10) / 10,
-  })).sort((a, b) => b.accepted - a.accepted);
+  // One row per NFT. The API lists one entry per device key, so an NFT paired to a new
+  // machine shows up twice; merge those, keeping the wallet that owns it now (last entry).
+  const byToken = new Map();
+  for (const c of contrib.contributors ?? []) {
+    const id = String(c.tokenId);
+    const e = byToken.get(id) ?? { tokenId: id, wallet: "", attempts: 0, accepted: 0, rejected: 0, pending: 0, ms: 0, devices: 0 };
+    e.wallet = c.wallet.toLowerCase(); e.attempts += Number(c.attempts); e.accepted += Number(c.accepted);
+    e.rejected += Number(c.rejected ?? 0); e.pending += Number(c.pending ?? 0); e.ms += Number(c.wallClockMs); e.devices++;
+    byToken.set(id, e);
+  }
+  const seats = [...byToken.values()].map(({ ms, ...e }) => ({ ...e, hours: Math.round(ms / 36e5 * 10) / 10 })).sort((a, b) => b.accepted - a.accepted);
   seats.forEach((s, i) => { s.rank = i + 1; });
 
   launches.sort((a, b) => b.number - a.number);
@@ -181,7 +188,15 @@ async function main() {
     v: 2,
     generatedAt: new Date().toISOString(),
     explorers: EXPLORER,
-    network: health ? { online: health.connectedDaemons, enrolled: health.activeEnrollments, acceptedLastDay: health.acceptedLastDay, build: health.version } : null,
+    network: health ? {
+      online: health.connectedDaemons, enrolled: health.activeEnrollments, acceptedLastDay: health.acceptedLastDay, build: health.version,
+      // paid orders: holders paying the network (x402) to open jobs, launches, oracle requests, workflows
+      payments: health.payments?.enabled ? {
+        paid: health.payments.orders?.paid ?? null, failed: health.payments.orders?.payment_failed ?? null,
+        expired: health.payments.orders?.expired ?? null, lastPaidAt: health.payments.lastPaidAt ?? null,
+        actions: health.payments.actions ?? [],
+      } : null,
+    } : null,
     nodeReserve: held ? { held: u256(held).toString(), earned: earned ? u256(earned).toString() : null, contract: REWARD_DISTRIBUTOR } : null,
     seatCount: seats.length,
     seats,

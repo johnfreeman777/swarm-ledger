@@ -73,11 +73,14 @@ section { margin-top: 38px; }
 .stat + .stat { padding-left: 16px; border-left: 1px solid var(--soft); }
 .stat .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1.2; margin-top: 4px; }
 .stat .v small { font-size: 14px; color: var(--dim); font-weight: 500; }
+.stats.five { grid-template-columns: repeat(5, 1fr); }
 @media (max-width: 700px) {
-  .stats { grid-template-columns: repeat(2, 1fr); }
-  .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+  .stats, .stats.five { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(2n+1) { padding-left: 0; border-left: 0; }
   .stat:nth-child(n+3) { border-top: 1px solid var(--soft); }
 }
+.tag.dev { border-color: var(--accent); color: var(--accent); }
+.seatlist { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
 
 .whoami { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 0; border-bottom: 1px solid var(--soft); }
 .whoami .addr { font-size: 15px; font-weight: 600; word-break: break-all; }
@@ -175,7 +178,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
   <div id="landing">
     <section>
       <div class="sechead"><h2>Network</h2><span class="aside" id="snapage"></span></div>
-      <div class="stats" id="nstats"></div>
+      <div class="stats five" id="nstats"></div>
     </section>
 
     <section>
@@ -184,7 +187,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
     </section>
 
     <section>
-      <div class="sechead"><h2>Most allocations</h2><span class="aside">wallets by number of launches that paid them</span></div>
+      <div class="sechead"><h2>Most allocations</h2><span class="aside">wallets by number of deployed launches that paid them</span></div>
       <table class="stack"><thead><tr><th>Wallet</th><th class="r">Launches</th><th class="r">Unclaimed</th><th class="r">Seats</th><th class="r">Accepted</th></tr></thead><tbody id="top"></tbody></table>
     </section>
   </div>
@@ -224,6 +227,9 @@ const lamp = (c) => c === true ? '<span class="lamp ok">claimed</span>' : c === 
 const bar = (f) => `<span class="meter"><i style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(1)}%"></i></span>${(f * 100).toFixed(0)}%`;
 const no = (n) => `<span class="no">No.&nbsp;${String(n).padStart(4, "0")}</span>`;
 const netTag = (c) => (c === 1 ? "" : '<span class="tag">test</span>');
+// Known wallets. The collection owner's address publishes the project's on-chain messages.
+const LABELS = { "0x200e710acaa6a93bbc77146026328c40f1d60fb1": "dev" };
+const labelTag = (w) => LABELS[w] ? `<span class="tag dev">${LABELS[w]}</span>` : "";
 // A launch that never got a distributor pays nobody: parked (deploy or checks failed) or abandoned.
 const isVoid = (l) => !l.distributor && l.status !== "live";
 const statusTag = (l) => l.status === "parked" ? '<span class="tag warn" title="' + esc(l.deployFailure ?? l.parkedReason ?? "parked") + '">parked</span>'
@@ -273,14 +279,20 @@ async function copy(t) { try { await navigator.clipboard.writeText(t); toast("co
 
 function renderLanding() {
   const n = snap.network, res = snap.nodeReserve;
+  const live = snap.launches.filter((l) => l.status === "live").length, dead = snap.launches.length - live;
+  const pay = n?.payments;
   $("nstats").innerHTML = [
     n ? stat("Agents online", num(n.online), `/ ${num(n.enrolled)}`) : "",
     n ? stat("Accepted, 24 h", num(n.acceptedLastDay)) : "",
-    stat("Launches", num(snap.launches.length)),
+    stat("Launches live", num(live), dead ? `+ ${num(dead)} void` : ""),
+    pay ? stat("Paid orders", num(pay.paid ?? 0), pay.lastPaidAt ? `last ${ago(pay.lastPaidAt).replace(" ago", "")}` : "") : "",
     res ? stat("NFT-node reserve", compact(res.held), "IMD") : "",
   ].join("");
+  const cells = $("nstats").children;
+  if (cells[2]) cells[2].title = `${num(live)} launches deployed a token and a distributor; ${num(dead)} were parked or abandoned before deploying, so their allocations are void.`;
+  if (pay && cells[3]) cells[3].title = `Holders paying the network to open work: ${pay.actions.join(", ")}. ${num(pay.failed ?? 0)} failed, ${num(pay.expired ?? 0)} expired.`;
   $("snapage").textContent = `snapshot ${ago(snap.generatedAt)}`;
-  $("foot").textContent = `Data: api.imd.fun, refreshed several times a day · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+  $("foot").textContent = `Data: api.imd.fun, refreshed about every 30 min · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
 
   const withAlloc = snap.launches.filter((l) => l.allocations.length);
   $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
@@ -305,9 +317,10 @@ function renderLanding() {
     const w = byWallet.get(a.wallet) ?? { wallet: a.wallet, launches: 0, unclaimed: 0 };
     w.launches++; if (a.claimed === false) w.unclaimed++; byWallet.set(a.wallet, w);
   }
-  for (const s of snap.seats) { const w = byWallet.get(s.wallet); if (w) { w.seats = (w.seats ?? 0) + 1; w.accepted = (w.accepted ?? 0) + s.accepted; } }
+  for (const s of snap.seats) { const w = byWallet.get(s.wallet); if (w) { w.seats = (w.seats ?? 0) + 1; w.accepted = (w.accepted ?? 0) + s.accepted; (w.ids ??= []).push(s.tokenId); } }
   const top = [...byWallet.values()].sort((a, b) => b.launches - a.launches || (b.accepted ?? 0) - (a.accepted ?? 0)).slice(0, 10);
-  $("top").innerHTML = top.map((w) => `<tr><td class="first" data-l="Wallet"><button class="walletlink" data-w="${w.wallet}">${short(w.wallet)}</button></td>
+  const seatList = (ids) => !ids?.length ? "" : `<span class="seatlist">${ids.slice(0, 6).map((i) => "#" + esc(i)).join(" ")}${ids.length > 6 ? ` +${ids.length - 6}` : ""}</span>`;
+  $("top").innerHTML = top.map((w) => `<tr><td class="first" data-l="Wallet"><button class="walletlink" data-w="${w.wallet}">${short(w.wallet)}</button>${labelTag(w.wallet)}${seatList(w.ids)}</td>
       <td data-l="Launches" class="r">${w.launches}</td><td data-l="Unclaimed" class="r">${w.unclaimed}</td>
       <td data-l="Seats" class="r">${w.seats ?? 0}</td><td data-l="Accepted" class="r">${num(w.accepted ?? 0)}</td></tr>`).join("");
   wrapCells($("top"));
@@ -367,7 +380,7 @@ function lookup(input) {
 
   const rows = rowsFor(wallet);
   const seats = snap.seats.filter((s) => s.wallet === wallet).sort((a, b) => b.accepted - a.accepted);
-  $("waddr").textContent = wallet;
+  $("waddr").innerHTML = esc(wallet) + labelTag(wallet);
   $("wscan").href = `https://etherscan.io/address/${wallet}`;
   renderWalletStats(wallet, rows, seats);
 
