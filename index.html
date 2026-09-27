@@ -64,7 +64,7 @@ form.q button:hover { opacity: .85; }
 #status.err { color: var(--alarm); border-color: var(--alarm); background: color-mix(in srgb, var(--alarm) 10%, transparent); }
 #status.note { color: var(--amber-ink); border-color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 tr.focus td { background: var(--accent-soft); }
-#wnfts { font-size: 12px; color: var(--dim); }
+#wnfts, #worders { font-size: 12px; color: var(--dim); }
 .hint .warn::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 7px; vertical-align: 1px; }
 
 section { margin-top: 38px; }
@@ -85,6 +85,9 @@ section { margin-top: 38px; }
   .stat:nth-child(n+3) { border-top: 1px solid var(--soft); }
 }
 .tag.dev { border-color: var(--accent); color: var(--accent); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; align-items: start; }
+@media (max-width: 700px) { .split { grid-template-columns: 1fr; } }
+p.note { font-size: 12px; color: var(--dim); margin: 10px 0 0; line-height: 1.5; }
 .seatlist { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
 
 .whoami { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 0; border-bottom: 1px solid var(--soft); }
@@ -165,7 +168,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
 
   <div id="wallet" hidden>
     <section>
-      <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a><span id="wnfts"></span></div>
+      <div class="whoami"><span class="label">Wallet</span><span class="addr" id="waddr"></span><button class="linkbtn" id="wcopy" type="button">copy</button><a class="linkbtn" id="wscan" target="_blank" rel="noopener">etherscan</a><span id="wnfts"></span><span id="worders"></span></div>
       <div class="stats" id="wstats"></div>
     </section>
 
@@ -194,6 +197,16 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
     <section id="payoutsec">
       <div class="sechead"><h2>Operator payouts</h2><span class="aside" id="payaside"></span></div>
       <table class="stack"><thead><tr><th>Date</th><th class="r">Seats</th><th class="r">Wallets</th><th class="r">Per seat</th><th class="r">Total</th><th>Transaction</th></tr></thead><tbody id="payouts"></tbody></table>
+    </section>
+
+    <section id="orders" hidden>
+      <div class="sechead"><h2>Paid orders</h2><span class="aside">requests paid in IMD at <a href="https://explorer.imd.fun/hire" target="_blank" rel="noopener">explorer.imd.fun/hire ↗</a></span></div>
+      <div class="stats five" id="ostats"></div>
+      <div class="split">
+        <table class="stack"><thead><tr><th>Day (UTC)</th><th class="r">Orders</th><th class="r">Wallets</th><th class="r">IMD</th></tr></thead><tbody id="odays"></tbody></table>
+        <table class="stack"><thead><tr><th>Top payers</th><th class="r">Orders</th><th class="r">IMD</th><th>Last</th></tr></thead><tbody id="opayers"></tbody></table>
+      </div>
+      <p class="note" id="onote"></p>
     </section>
 
     <section>
@@ -240,6 +253,8 @@ function compact(raw, decimals = 18) {
 function imd(raw) {
   try { const c = (BigInt(raw) * 100n + 5n * 10n ** 17n) / 10n ** 18n; return (Number(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); } catch { return "?"; }
 }
+// IMD without decimals once the amount is large enough that they are noise
+const whole = (raw) => { try { return BigInt(raw) >= 100n * 10n ** 18n ? num(Number((BigInt(raw) + 5n * 10n ** 17n) / 10n ** 18n)) : imd(raw); } catch { return "?"; } };
 const seatsIn = (raw, per) => (per && per !== "0" ? Number((BigInt(raw) + BigInt(per) / 2n) / BigInt(per)) : 0);
 const txLink = (h) => `<a href="https://etherscan.io/tx/${esc(h)}" target="_blank" rel="noopener">${short(h)} ↗</a>`;
 const pct = (bps) => (Number(bps) / 100).toFixed(2) + "%";
@@ -250,7 +265,8 @@ const bar = (f) => `<span class="meter"><i style="width:${Math.max(0, Math.min(1
 const no = (n) => `<span class="no">No.&nbsp;${String(n).padStart(4, "0")}</span>`;
 const netTag = (c) => (c === 1 ? "" : '<span class="tag">test</span>');
 // Known wallets. The collection owner's address publishes the project's on-chain messages.
-const LABELS = { "0x200e710acaa6a93bbc77146026328c40f1d60fb1": "dev" };
+// surfsurf.eth is the developer's operations wallet: it sends the operator payouts.
+const LABELS = { "0x200e710acaa6a93bbc77146026328c40f1d60fb1": "dev", "0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7": "dev ops" };
 const labelTag = (w) => LABELS[w] ? `<span class="tag dev">${LABELS[w]}</span>` : "";
 // A launch that never got a distributor pays nobody: parked (deploy or checks failed) or abandoned.
 const isVoid = (l) => !l.distributor && l.status !== "live";
@@ -314,7 +330,7 @@ function renderLanding() {
   if (cells[2]) cells[2].title = `${num(live)} launches deployed a token and a distributor; ${num(dead)} were parked or abandoned before deploying, so their allocations are void.`;
   if (pay && cells[3]) cells[3].title = `Holders paying the network to open work: ${pay.actions.join(", ")}. ${num(pay.failed ?? 0)} failed, ${num(pay.expired ?? 0)} expired.`;
   $("snapage").textContent = `snapshot ${ago(snap.generatedAt)}`;
-  $("foot").textContent = `Data: api.imd.fun and Blockscout, refreshed about every 30 min · payouts = IMD Disperse rounds from the developer's wallet · your claims re-checked live on chain via public RPC · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
+  $("foot").textContent = `Data: api.imd.fun and Blockscout, refreshed about every 30 min · payouts = IMD Disperse rounds from the developer's wallet · your claims re-checked live on chain via public RPC · paid orders = IMD settled into the hire page's payment wallet · NFT-node reserve = IMD set aside by POOL4 for nodes, no payout contract yet`;
 
   const pays = snap.payouts ?? [];
   $("payoutsec").hidden = snap.payouts == null;
@@ -324,6 +340,8 @@ function renderLanding() {
       <td data-l="Per seat" class="r">${imd(p.perSeat)} IMD</td><td data-l="Total" class="r">${imd(p.total)} IMD</td>
       <td data-l="Transaction">${txLink(p.tx)}</td></tr>`).join("") || `<tr><td class="empty" colspan="6">No payouts yet.</td></tr>`;
   wrapCells($("payouts"));
+
+  renderOrders();
 
   const withAlloc = snap.launches.filter((l) => l.allocations.length);
   $("launches").innerHTML = withAlloc.slice(0, 12).map((l) => {
@@ -355,6 +373,34 @@ function renderLanding() {
       <td data-l="Launches" class="r">${w.launches}</td><td data-l="Unclaimed" class="r">${w.unclaimed}</td>
       <td data-l="Seats" class="r">${w.seats ?? 0}</td><td data-l="Accepted" class="r">${num(w.accepted ?? 0)}</td></tr>`).join("");
   wrapCells($("top"));
+}
+
+// Paid requests: counts from the API, amounts and payers from the IMD transfers into the
+// network's payment wallet (one x402 settle per paid order).
+function renderOrders() {
+  const o = snap.orders, pay = snap.network?.payments;
+  $("orders").hidden = !o;
+  if (!o) return;
+  const price = [...new Set(Object.values(o.prices ?? {}).filter(Boolean))];
+  $("ostats").innerHTML = [
+    stat("Orders paid", num(o.count), o.last ? `last ${ago(o.last).replace(" ago", "")}` : ""),
+    stat("IMD paid", whole(o.total), `${num(o.payerCount)} wallets`),
+    stat("Last 24 h", num(o.lastDay.orders), `${num(o.lastDay.payers)} wallets`),
+    stat("Held", o.held != null ? whole(o.held) : "?", "IMD"),
+    pay ? stat("Unpaid quotes", num(pay.expired ?? 0), pay.failed ? `+ ${num(pay.failed)} failed` : "") : stat("Price", price.length === 1 ? imd(price[0]) : "?", "IMD"),
+  ].join("");
+  const cells = $("ostats").children;
+  if (cells[3]) cells[3].title = "IMD the payment wallet still holds: what orders paid in and has not been passed on to seats yet.";
+  if (pay && cells[4]) cells[4].title = `Quotes that expired before anyone paid them. Failed payments: ${Object.entries(pay.failedReasons ?? {}).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ") || "none"}.`;
+  $("odays").innerHTML = o.days.slice(0, 10).map((d) => `<tr><td class="first" data-l="Day">${day(d.day + "T12:00:00Z")}</td>
+      <td data-l="Orders" class="r">${num(d.orders)}</td><td data-l="Wallets" class="r">${num(d.payers)}</td><td data-l="IMD" class="r">${imd(d.imd)}</td></tr>`).join("")
+    || `<tr><td class="empty" colspan="4">No paid orders yet.</td></tr>`;
+  const top = Object.entries(o.payers).sort((a, b) => b[1].orders - a[1].orders || (a[1].last < b[1].last ? 1 : -1)).slice(0, 10);
+  $("opayers").innerHTML = top.map(([w, p]) => `<tr><td class="first" data-l="Wallet"><button class="walletlink" data-w="${esc(w)}">${short(w)}</button>${labelTag(w)}</td>
+      <td data-l="Orders" class="r">${num(p.orders)}</td><td data-l="IMD" class="r">${imd(p.imd)}</td><td data-l="Last" class="dimtxt">${ago(p.last)}</td></tr>`).join("")
+    || `<tr><td class="empty" colspan="4">No payers yet.</td></tr>`;
+  wrapCells($("odays")); wrapCells($("opayers"));
+  $("onote").innerHTML = `${price.length === 1 ? `${imd(price[0])} IMD per request (job, contracts, oracle question or company launch), ` : ""}paid on Ethereum mainnet through Permit2 to the payment wallet <a href="https://etherscan.io/address/${esc(o.wallet)}" target="_blank" rel="noopener">${short(o.wallet)} ↗</a>. Which kind of request each payment bought is not public. Preview a request for free before paying with <code>/check</code> in <a href="https://t.me/imd_swarm_watch_bot" target="_blank" rel="noopener">Swarm Watch</a>.`;
 }
 
 // one wrapper per cell, so the small-screen layout keeps a cell's pieces together
@@ -413,6 +459,8 @@ function renderWalletStats(wallet, rows, seats) {
   const unclaimed = rows.filter((r) => r.a.claimed === false).length;
   const voids = rows.filter((r) => isVoid(r.l)).length;
   const received = paidTo(wallet).reduce((n, x) => n + BigInt(x.amount), 0n);
+  const ordered = snap.orders?.payers?.[wallet];
+  $("worders").innerHTML = ordered ? `paid ${num(ordered.orders)} order${ordered.orders === 1 ? "" : "s"} (${imd(ordered.imd)} IMD) at the hire page` : "";
   $("wstats").innerHTML = [
     stat("Seats", seats.length),
     stat("Accepted tasks", num(seats.reduce((n, s) => n + s.accepted, 0))),
@@ -576,11 +624,13 @@ fetch(DATA_URL, { cache: "no-cache" })
   .then((d) => {
     snap = d; renderLanding();
     const start = decodeURIComponent(location.hash.slice(1));
-    if (start) lookup(start);
+    if (start === "orders") setTimeout(() => $("orders").scrollIntoView(), 50);
+    else if (start) lookup(start);
     else { const last = load("swarm-ledger-wallet"); if (last) $("q").value = last; }
     addEventListener("hashchange", () => {
       const h = decodeURIComponent(location.hash.slice(1));
-      if (h && h !== current) lookup(h); else if (!h && current) showLanding();
+      if (h === "orders") { if (current) showLanding(); history.replaceState(null, "", "#orders"); $("orders").scrollIntoView({ behavior: "smooth" }); }
+      else if (h && h !== current) lookup(h); else if (!h && current) showLanding();
     });
   })
   .catch((e) => { $("status").textContent = "Could not load data: " + e.message; });

@@ -27,6 +27,11 @@ const PAYOUT_SENDER = "0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7";
 const DISPERSE = "0xd15fe25ed0dba12fe05e7029c88b10c25e8880e3";
 const PAYOUTS_SINCE = "2026-09-20T00:00:00Z"; // the swarm went live on 21 Sep
 const BLOCKSCOUT = "https://eth.blockscout.com/api/v2";
+// Price list and payment wallet for paid requests (explorer.imd.fun/hire)
+const HIRE_CAPS = "https://explorer.imd.fun/api/requests/capabilities";
+const snapshotTime = new Date().toISOString();
+// x402 settle on the Permit2 proxy; Blockscout shows either the name or the raw selector
+const SETTLE = new Set(["settle", "0x13cd3b53"]);
 
 const SEL = {
   claimed: "0x120aa877", // claimed(uint256,address)
@@ -35,6 +40,7 @@ const SEL = {
   sweepDelay: "0x80d9adca", // sweepDelay()
   heldNft: "0x8d9f2fff", // heldNft()
   nftEarned: "0x4c110e71", // nftEarned()
+  balanceOf: "0x70a08231", // balanceOf(address)
 };
 
 const word = (hex) => hex.replace(/^0x/, "").padStart(64, "0");
@@ -124,6 +130,57 @@ async function readPayouts() {
     });
   }
   return payouts.sort((a, b) => b.block - a.block);
+}
+
+// Paid orders (explorer.imd.fun/hire): each paid request is one x402 `settle` that moves
+// the quoted IMD from the payer to the network's payment wallet on mainnet. The API only
+// publishes counts, so the history comes from those transfers.
+async function readOrders() {
+  const r = await fetch(HIRE_CAPS, { signal: AbortSignal.timeout(30_000), headers: { "user-agent": "swarm-ledger" } });
+  if (!r.ok) throw new Error(`capabilities: HTTP ${r.status}`);
+  const caps = await r.json();
+  const pay = caps.actions?.[0]?.payment;
+  if (!pay?.payTo) throw new Error("capabilities: no payment wallet");
+  const wallet = pay.payTo.toLowerCase(), token = pay.asset.toLowerCase();
+  const prices = Object.fromEntries(caps.actions.map((a) => [a.action, a.payment?.amount ?? null]));
+
+  const transfers = [];
+  let query = `?type=ERC-20&filter=to&token=${token}`;
+  for (let page = 0; page < 400; page++) {
+    const res = await blockscout(`/addresses/${wallet}/token-transfers${query}`);
+    for (const t of res.items ?? []) {
+      if (t.to?.hash?.toLowerCase() !== wallet) continue;
+      transfers.push({ from: t.from.hash.toLowerCase(), value: BigInt(t.total.value), time: t.timestamp, tx: t.transaction_hash, settle: SETTLE.has(t.method) });
+    }
+    if (!res.next_page_params) break;
+    query = "?" + new URLSearchParams({ type: "ERC-20", filter: "to", token, ...res.next_page_params }).toString();
+  }
+  const orders = transfers.filter((t) => t.settle);
+  const byDay = new Map(), byPayer = new Map();
+  let total = 0n;
+  for (const o of orders) {
+    total += o.value;
+    const d = o.time.slice(0, 10);
+    const e = byDay.get(d) ?? { day: d, orders: 0, imd: 0n, payers: new Set() };
+    e.orders++; e.imd += o.value; e.payers.add(o.from); byDay.set(d, e);
+    const p = byPayer.get(o.from) ?? { wallet: o.from, orders: 0, imd: 0n, last: o.time };
+    p.orders++; p.imd += o.value; if (o.time > p.last) p.last = o.time; byPayer.set(o.from, p);
+  }
+  const [bal] = await ethCalls(1, [{ to: token, data: SEL.balanceOf + addrWord(wallet) }]);
+  const newest = orders.reduce((m, o) => (o.time > m ? o.time : m), "");
+  const since24 = new Date(Date.parse(snapshotTime) - 864e5).toISOString();
+  return {
+    wallet, token, prices,
+    count: orders.length, total: total.toString(), payerCount: byPayer.size,
+    first: orders.reduce((m, o) => (!m || o.time < m ? o.time : m), null), last: newest || null,
+    lastDay: { orders: orders.filter((o) => o.time >= since24).length, payers: new Set(orders.filter((o) => o.time >= since24).map((o) => o.from)).size },
+    // IMD the payment wallet still holds: received from orders and not yet passed on
+    held: bal ? u256(bal).toString() : null,
+    otherIn: transfers.filter((t) => !t.settle).reduce((n, t) => n + t.value, 0n).toString(),
+    days: [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : -1)).map((d) => ({ day: d.day, orders: d.orders, imd: d.imd.toString(), payers: d.payers.size })),
+    payers: Object.fromEntries([...byPayer].map(([w, p]) => [w, { orders: p.orders, imd: p.imd.toString(), last: p.last }])),
+    recent: orders.sort((a, b) => (a.time < b.time ? 1 : -1)).slice(0, 12).map((o) => ({ from: o.from, value: o.value.toString(), time: o.time, tx: o.tx })),
+  };
 }
 
 async function mapLimit(items, limit, fn) {
@@ -254,18 +311,20 @@ async function main() {
 
   // Payouts are optional: if Blockscout is down, publish the rest without them.
   const payouts = await readPayouts().catch((e) => { console.warn("payouts skipped:", e.message); return null; });
+  const orders = await readOrders().catch((e) => { console.warn("orders skipped:", e.message); return null; });
 
   launches.sort((a, b) => b.number - a.number);
   const snapshot = {
     v: 2,
-    generatedAt: new Date().toISOString(),
+    generatedAt: snapshotTime,
     explorers: EXPLORER,
     network: health ? {
       online: health.connectedDaemons, enrolled: health.activeEnrollments, acceptedLastDay: health.acceptedLastDay, build: health.version,
       // paid orders: holders paying the network (x402) to open jobs, launches, oracle requests, workflows
       payments: health.payments?.enabled ? {
         paid: health.payments.orders?.paid ?? null, failed: health.payments.orders?.payment_failed ?? null,
-        expired: health.payments.orders?.expired ?? null, lastPaidAt: health.payments.lastPaidAt ?? null,
+        expired: health.payments.orders?.expired ?? null, pending: health.payments.orders?.payment_pending ?? null,
+        failedReasons: health.payments.attempts?.failedReasons ?? {}, lastPaidAt: health.payments.lastPaidAt ?? null,
         actions: health.payments.actions ?? [],
       } : null,
     } : null,
@@ -275,12 +334,13 @@ async function main() {
     launches,
     payouts,
     payoutSender: PAYOUT_SENDER,
+    orders,
   };
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(snapshot));
   const withAlloc = launches.filter((l) => l.allocations.length).length;
   const withReward = launches.filter((l) => l.reward).length;
-  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats, ${payouts ? payouts.length + " payouts" : "no payouts"}`);
+  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats, ${payouts ? payouts.length + " payouts" : "no payouts"}, ${orders ? orders.count + " paid orders" : "no orders"}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
