@@ -190,6 +190,16 @@ async function main() {
       const totals = {};
       for (const w of rs.work) totals[w.kind] = (totals[w.kind] ?? 0) + 1;
       reward = { from: rs.from, to: rs.to, recentBps: rs.recentContributorBps ?? null, version: rs.version ?? null, workTotals: totals, recentWallets: per.size };
+    } else if (rs && Array.isArray(rs.breakdown)) {
+      // Snapshot v2 (from 27 Sep) drops the per-item list: only network totals by kind and the
+      // per-wallet split, so what each wallet did is no longer published.
+      const split = new Map(rs.breakdown.map((b) => [b.wallet.toLowerCase(), b]));
+      for (const a of allocations) {
+        const b = split.get(a.wallet);
+        if (b) { a.launchAmount = b.launchAmount; a.recentAmount = b.recentAmount; }
+      }
+      reward = { from: rs.from, to: rs.to, recentBps: rs.recentContributorBps ?? null, version: rs.version ?? null, workTotals: rs.workByKind ?? {},
+        recentWallets: rs.breakdown.filter((b) => b.recentAmount && b.recentAmount !== "0").length };
     }
     const failure = d.deployFailure ? String(d.deployFailure).split("\n")[0].slice(0, 140) : null;
     launches.push({
