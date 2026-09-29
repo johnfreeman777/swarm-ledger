@@ -27,6 +27,7 @@ const PAYOUT_SENDER = "0x047f606fd5b2baa5f5c6c4ab8958e45cb6b054b7";
 const DISPERSE = "0xd15fe25ed0dba12fe05e7029c88b10c25e8880e3";
 const PAYOUTS_SINCE = "2026-09-20T00:00:00Z"; // the swarm went live on 21 Sep
 const BLOCKSCOUT = "https://eth.blockscout.com/api/v2";
+const PUBLISHED = "https://johnfreeman777.github.io/swarm-ledger/data/snapshot.json";
 // Price list and payment wallet for paid requests (explorer.imd.fun/hire)
 const HIRE_CAPS = "https://explorer.imd.fun/api/requests/capabilities";
 const snapshotTime = new Date().toISOString();
@@ -47,15 +48,31 @@ const word = (hex) => hex.replace(/^0x/, "").padStart(64, "0");
 const addrWord = (a) => word(a.toLowerCase());
 const u256 = (hex, i = 0) => BigInt("0x" + (hex.replace(/^0x/, "").slice(i * 64, i * 64 + 64) || "0"));
 
-async function getJson(path, attempt = 0) {
+// The control plane sheds load with 503 "busy" + retry-after, so honour that and try longer.
+async function getJson(path, attempt = 0, tries = 3, deadline = Infinity) {
+  let wait = 1500 * (attempt + 1);
   try {
     const r = await fetch(API + path, { signal: AbortSignal.timeout(30_000), headers: { "user-agent": "swarm-ledger" } });
-    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    if (!r.ok) {
+      const ra = Number(r.headers.get("retry-after"));
+      if (ra > 0) wait = Math.min(ra * 1000 * (attempt + 1), 20_000);
+      throw new Error(`${path}: HTTP ${r.status}`);
+    }
     return await r.json();
   } catch (e) {
-    if (attempt < 2) { await new Promise((s) => setTimeout(s, 1500 * (attempt + 1))); return getJson(path, attempt + 1); }
+    if (attempt < tries - 1 && Date.now() + wait < deadline) { await new Promise((s) => setTimeout(s, wait)); return getJson(path, attempt + 1, tries, deadline); }
     throw e;
   }
+}
+
+// The last published snapshot: a launch whose detail read fails this run keeps its old entry
+// instead of vanishing from the site (claim status is re-read on chain below either way).
+async function previousLaunches() {
+  try {
+    const r = await fetch(PUBLISHED, { signal: AbortSignal.timeout(20_000) });
+    if (!r.ok) return new Map();
+    return new Map(((await r.json()).launches ?? []).map((l) => [l.id, l]));
+  } catch { return new Map(); }
 }
 
 // JSON-RPC batch eth_call with endpoint fallback; returns results in request order (null on error).
@@ -194,7 +211,7 @@ async function mapLimit(items, limit, fn) {
 
 async function main() {
   const [list, sitesRes, contrib, health] = await Promise.all([
-    getJson("/launches"), getJson("/sites"), getJson("/contributors"), getJson("/health").catch(() => null),
+    getJson("/launches?limit=1000"), getJson("/sites"), getJson("/contributors"), getJson("/health").catch(() => null),
   ]);
   const summaries = Array.isArray(list) ? list : list.launches ?? [];
   const sites = sitesRes.sites ?? [];
@@ -210,11 +227,24 @@ async function main() {
     } catch { /* not a claim site */ }
   });
 
-  const details = await mapLimit(summaries, 6, (l) => getJson(`/launches/${l.id}`).catch(() => null));
+  const detailsDeadline = Date.now() + 5 * 60_000;
+  const prev = await previousLaunches();
+
+  // Only launches that are new or changed since the last snapshot are read in detail; the
+  // plane is busy and 160+ reads every run are load it does not need. The Actions job has
+  // 10 minutes, so whatever is not read in 5 also comes from the last snapshot.
+  const unchanged = (l) => { const o = prev.get(l.id); return o && o.updatedAt && o.updatedAt === l.updatedAt; };
+  const details = await mapLimit(summaries, 2, (l) => unchanged(l) || Date.now() > detailsDeadline ? null
+    : getJson(`/launches/${l.id}`, 0, 5, detailsDeadline).catch(() => null));
 
   const launches = [];
-  for (const d of details) {
-    if (!d) continue;
+  let reused = 0, missing = 0;
+  for (const [i, d] of details.entries()) {
+    if (!d) {
+      const old = prev.get(summaries[i].id);
+      if (old) { launches.push(old); reused++; } else missing++;
+      continue;
+    }
     const token = (d.artifacts ?? []).find((a) => a.role === "token");
     const distributor = (d.artifacts ?? []).find((a) => a.role === "distributor");
     const manifestToken = d.attestation?.manifest?.token ?? {};
@@ -262,7 +292,7 @@ async function main() {
     launches.push({
       number: d.launchNumber, id: d.id, kind: d.kind, status: d.status, chainId: d.chainId,
       policy: d.policyVersion ?? null, parkedReason: d.parkedReason ?? null, deployFailure: failure, reward,
-      createdAt: d.createdAt, repo: d.sourceRepoUrl ?? null,
+      createdAt: d.createdAt, updatedAt: d.updatedAt ?? summaries[i].updatedAt ?? null, repo: d.sourceRepoUrl ?? null,
       site: distributor ? siteByDistributor.get(distributor.address.toLowerCase()) ?? null : null,
       token: token ? { address: token.address, name: manifestToken.name ?? token.name, symbol: manifestToken.symbol ?? null, decimals: manifestToken.decimals ?? 18 } : null,
       distributor: distributor?.address ?? null,
@@ -310,7 +340,20 @@ async function main() {
   seats.forEach((s, i) => { s.rank = i + 1; });
 
   // Payouts are optional: if Blockscout is down, publish the rest without them.
-  const payouts = await readPayouts().catch((e) => { console.warn("payouts skipped:", e.message); return null; });
+  const rounds = await readPayouts().catch((e) => { console.warn("payouts skipped:", e.message); return null; });
+  // The same wallet also sends other Disperse rounds, e.g. refunding 0.5 IMD per test task.
+  // An operator payout pays each wallet for at most the NFTs it runs (2-3 exceptions in a few
+  // hundred: seats sold since); a refund pays wallets far beyond that, most with no seat at all.
+  const seatsPerWallet = new Map();
+  for (const s of seats) seatsPerWallet.set(s.wallet, (seatsPerWallet.get(s.wallet) ?? 0) + 1);
+  const isOperatorRound = (p) => {
+    const per = BigInt(p.perSeat ?? 0), ws = Object.entries(p.paid);
+    if (!per || !ws.length) return false;
+    const over = ws.filter(([w, v]) => Number((BigInt(v) + per / 2n) / per) > (seatsPerWallet.get(w) ?? 0)).length;
+    return over / ws.length <= 0.25;
+  };
+  const payouts = rounds && rounds.filter(isOperatorRound);
+  const otherDrops = rounds && rounds.filter((p) => !isOperatorRound(p)).map(({ seatCount, perSeat, ...p }) => p);
   const orders = await readOrders().catch((e) => { console.warn("orders skipped:", e.message); return null; });
 
   launches.sort((a, b) => b.number - a.number);
@@ -333,6 +376,7 @@ async function main() {
     seats,
     launches,
     payouts,
+    otherDrops,
     payoutSender: PAYOUT_SENDER,
     orders,
   };
@@ -340,7 +384,7 @@ async function main() {
   await writeFile(OUT, JSON.stringify(snapshot));
   const withAlloc = launches.filter((l) => l.allocations.length).length;
   const withReward = launches.filter((l) => l.reward).length;
-  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats, ${payouts ? payouts.length + " payouts" : "no payouts"}, ${orders ? orders.count + " paid orders" : "no orders"}`);
+  console.log(`wrote ${OUT}: ${launches.length} launches (${withAlloc} with allocations, ${withReward} with reward breakdown), ${seats.length} seats (${reused} launches kept from the last snapshot, ${missing} unreadable), ${payouts ? `${payouts.length} payouts (+${otherDrops.length} other drops)` : "no payouts"}, ${orders ? orders.count + " paid orders" : "no orders"}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

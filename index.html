@@ -175,6 +175,7 @@ footer { margin: 56px 0 40px; padding-top: 14px; border-top: var(--rule); font-s
     <section>
       <div class="sechead"><h2>Payouts</h2><span class="aside" id="wpayaside">IMD sent to seats that ran the daemon</span></div>
       <table class="stack"><thead><tr><th>Date</th><th class="r">NFTs paid</th><th class="r">Per NFT</th><th class="r">Received</th><th>Transaction</th></tr></thead><tbody id="wpay"></tbody></table>
+      <p class="dimtxt" id="wother" style="font-size:12px;margin:10px 0 0" hidden></p>
     </section>
 
     <section>
@@ -524,6 +525,11 @@ async function lookup(input) {
       + `<tr class="tally"><td class="first" data-l="Total">Total</td><td data-l="Payouts">${got.length} payout${got.length === 1 ? "" : "s"}</td><td data-l=""></td><td data-l="Received" class="r">${imd(gotTotal)} IMD</td><td data-l=""></td></tr>`
     : snap.payouts == null ? `<tr><td class="empty" colspan="5">Payout data is unavailable in this snapshot.</td></tr>`
     : `<tr><td class="empty" colspan="5">No payouts to this wallet yet. Payouts go to seats that ran the daemon during a round.</td></tr>`;
+  // other IMD the developer sent this wallet (e.g. refunds for test tasks), kept out of the payout totals
+  const other = (snap.otherDrops ?? []).filter((p) => p.paid[wallet]);
+  $("wother").hidden = !other.length;
+  $("wother").innerHTML = other.length ? `Also received from the developer's wallet, not counted as payouts (e.g. refunds for test tasks): `
+    + other.map((p) => `${imd(p.paid[wallet])} IMD on ${day(p.time)} (${txLink(p.tx)})`).join(", ") + "." : "";
 
   $("alloc").innerHTML = rows.length ? rows.map(({ l, a }) => {
     const sweep = l.sweepAfter ? ` title="Unclaimed tokens can be swept to the treasury after ${new Date(l.sweepAfter * 1000).toDateString()}"` : "";
